@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Synema</title>
+  <script>
+    // SPA redirect for GitHub Pages
+    // Converts path to query string so index.html can restore it
+    var l = window.location;
+    l.replace(
+      l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+      l.pathname.split('/').slice(0, 1).join('/') +
+      '/?p=' + encodeURIComponent(l.pathname + l.search) +
+      (l.hash || '')
+    );
+  </script>
+</head>
+<body></body>
+</html>
