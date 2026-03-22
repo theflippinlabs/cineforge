@@ -19,6 +19,17 @@
     <meta name="twitter:image" content="https://synemalabs.xyz/og-image.jpg" />
 
     <link rel="canonical" href="https://synemalabs.xyz" />
+    <script>
+      // Restore path from GitHub Pages 404 redirect
+      (function() {
+        var p = window.location.search.match(/[?&]p=([^&]+)/);
+        if (p) {
+          window.history.replaceState(null, null,
+            decodeURIComponent(p[1]) + window.location.search.replace(/[?&]p=[^&]+/, '').replace(/^&/, '?') + window.location.hash
+          );
+        }
+      })();
+    </script>
   </head>
 
   <body>
