@@ -21,6 +21,11 @@ import Jobs from './pages/dashboard/Jobs';
 import WalletPage from './pages/dashboard/Wallet';
 import Settings from './pages/dashboard/Settings';
 
+// Admin pages
+import AdminAccessRules from './pages/admin/AccessRules';
+import AdminPresets from './pages/admin/Presets';
+import AdminRenderProfiles from './pages/admin/RenderProfiles';
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -107,6 +112,33 @@ export default function App() {
                 </DashboardLayout>
               }
             />
+
+            {/* Admin */}
+            <Route
+              path="/admin/access-rules"
+              element={
+                <DashboardLayout>
+                  <AdminAccessRules />
+                </DashboardLayout>
+              }
+            />
+            <Route
+              path="/admin/presets"
+              element={
+                <DashboardLayout>
+                  <AdminPresets />
+                </DashboardLayout>
+              }
+            />
+            <Route
+              path="/admin/render-profiles"
+              element={
+                <DashboardLayout>
+                  <AdminRenderProfiles />
+                </DashboardLayout>
+              }
+            />
+            <Route path="/admin" element={<Navigate to="/admin/access-rules" replace />} />
 
             {/* Catch all */}
             <Route path="*" element={<Navigate to="/" replace />} />
