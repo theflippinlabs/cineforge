@@ -126,7 +126,7 @@ function DemoMockup() {
         <div className="w-2.5 h-2.5 rounded-full bg-warning/60" />
         <div className="w-2.5 h-2.5 rounded-full bg-success/60" />
         <div className="flex-1 mx-4 h-5 rounded bg-secondary/60 flex items-center px-3">
-          <span className="text-xs text-muted-foreground font-mono">app.synema.io/dashboard/create</span>
+          <span className="text-xs text-muted-foreground font-mono">app.synemalabs.xyz/dashboard/create</span>
         </div>
       </div>
 
