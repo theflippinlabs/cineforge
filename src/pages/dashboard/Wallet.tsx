@@ -30,7 +30,7 @@ import { cn } from '../../lib/utils';
 
 const NFT_COLLECTIONS = [
   {
-    name: 'CineForge Genesis Pass',
+    name: 'Synema Genesis Pass',
     contract: '0x1234...abcd',
     chain: 'Ethereum',
     tier: 'premium',
@@ -185,7 +185,7 @@ export default function WalletPage() {
                 </div>
                 <p className="text-sm text-muted-foreground">
                   {accessStatus?.nftVerified
-                    ? 'You have full access to all CineForge features, unlimited generations, and priority rendering.'
+                    ? 'You have full access to all Synema features, unlimited generations, and priority rendering.'
                     : 'Connect a wallet holding a valid NFT to unlock premium features, or upgrade to Pro.'}
                 </p>
                 {accessStatus && (

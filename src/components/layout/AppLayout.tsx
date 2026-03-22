@@ -11,7 +11,6 @@ import {
   X,
   ChevronRight,
   Activity,
-  Film,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback } from '../ui/avatar';
@@ -27,6 +26,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { signOut } from '../../lib/auth';
 import { cn } from '../../lib/utils';
+import { LogoMark } from '../LogoMark';
 
 const NAV_ITEMS = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Overview' },
@@ -106,10 +106,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Logo */}
       <div className="flex items-center gap-3 px-5 h-16 border-b border-sidebar-border">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded bg-primary/15 border border-primary/20 flex items-center justify-center">
-            <Film className="w-4 h-4 text-primary" />
-          </div>
-          <span className="font-display font-semibold text-foreground tracking-tight">CineForge</span>
+          <LogoMark />
+          <span className="font-display font-semibold text-foreground tracking-tight">Synema</span>
         </div>
       </div>
 
@@ -201,8 +199,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         {/* Mobile header */}
         <header className="md:hidden flex items-center justify-between h-14 px-4 border-b border-border bg-background/95 backdrop-blur-sm">
           <div className="flex items-center gap-2">
-            <Film className="w-5 h-5 text-primary" />
-            <span className="font-display font-semibold text-sm">CineForge</span>
+            <LogoMark />
+            <span className="font-display font-semibold text-sm">Synema</span>
           </div>
           <Button
             variant="ghost"

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Film, ArrowLeft, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { LogoMark } from '../../components/LogoMark';
 import { LogoMark } from '../../components/LogoMark';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -34,7 +35,7 @@ export default function ForgotPassword() {
       <div className="w-full max-w-sm">
         <Link to="/" className="flex items-center gap-2 mb-10">
           <LogoMark />
-          <span className="font-display font-semibold text-foreground tracking-tight">CineForge</span>
+          <span className="font-display font-semibold text-foreground tracking-tight">Synema</span>
         </Link>
 
         {sent ? (

@@ -129,7 +129,7 @@ export default function AdminAccessRules() {
             {[
               { key: 'name', label: 'Rule Name', placeholder: 'e.g. Genesis Pass' },
               { key: 'contract_address', label: 'Contract Address', placeholder: '0x...' },
-              { key: 'collection_name', label: 'Collection Name', placeholder: 'e.g. CineForge Genesis' },
+              { key: 'collection_name', label: 'Collection Name', placeholder: 'e.g. Synema Genesis' },
               { key: 'chain', label: 'Chain', placeholder: 'Ethereum' },
               { key: 'tier_unlocked', label: 'Tier Unlocked', placeholder: 'premium' },
             ].map(({ key, label, placeholder }) => (

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Film, Eye, EyeOff, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Eye, EyeOff, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { LogoMark } from '../../components/LogoMark';
 import { LogoMark } from '../../components/LogoMark';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -77,7 +78,7 @@ export default function Signup() {
         <div className="w-full max-w-sm">
           <Link to="/" className="flex items-center gap-2 mb-10 group">
             <LogoMark />
-            <span className="font-display font-semibold text-foreground tracking-tight">CineForge</span>
+            <span className="font-display font-semibold text-foreground tracking-tight">Synema</span>
           </Link>
 
           <div className="mb-8">
@@ -202,13 +203,13 @@ export default function Signup() {
         />
         <div className="relative text-center px-12">
           <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto mb-6">
-            <Film className="w-8 h-8 text-primary/60" />
+            <LogoMark className="w-12 h-12" />
           </div>
           <h2 className="font-display text-2xl font-bold text-foreground/80 tracking-tight mb-3">
             Your creative pipeline,<br />automated.
           </h2>
           <p className="text-sm text-muted-foreground leading-relaxed max-w-xs">
-            Join artists and brands using CineForge to produce cinematic music videos at scale.
+            Join artists and brands using Synema to produce cinematic music videos at scale.
           </p>
         </div>
       </div>

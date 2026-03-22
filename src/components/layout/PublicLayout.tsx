@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Film, Menu, X } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
+import { LogoMark } from '../LogoMark';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
 
@@ -27,10 +28,8 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
       >
         <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2.5 group">
-            <div className="w-7 h-7 rounded bg-primary/15 border border-primary/25 flex items-center justify-center group-hover:border-primary/40 transition-colors">
-              <Film className="w-4 h-4 text-primary" />
-            </div>
-            <span className="font-display font-semibold text-foreground tracking-tight">CineForge</span>
+            <LogoMark />
+            <span className="font-display font-semibold text-foreground tracking-tight">Synema</span>
           </Link>
 
           {/* Desktop nav */}
@@ -85,10 +84,8 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-10 mb-12">
             <div className="md:col-span-1">
               <div className="flex items-center gap-2 mb-4">
-                <div className="w-7 h-7 rounded bg-primary/15 border border-primary/25 flex items-center justify-center">
-                  <Film className="w-4 h-4 text-primary" />
-                </div>
-                <span className="font-display font-semibold tracking-tight">CineForge</span>
+                <LogoMark />
+                <span className="font-display font-semibold tracking-tight">Synema</span>
               </div>
               <p className="text-sm text-muted-foreground leading-relaxed max-w-xs">
                 AI-powered music video creation for artists, brands, and Web3 communities.
@@ -120,7 +117,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
           </div>
           <div className="cinematic-line mb-6" />
           <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-muted-foreground">
-            <p>© {new Date().getFullYear()} CineForge. All rights reserved.</p>
+            <p>© {new Date().getFullYear()} Synema. All rights reserved.</p>
             <p className="font-mono">v1.0.0 — Production Ready</p>
           </div>
         </div>

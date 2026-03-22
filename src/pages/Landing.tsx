@@ -126,7 +126,7 @@ function DemoMockup() {
         <div className="w-2.5 h-2.5 rounded-full bg-warning/60" />
         <div className="w-2.5 h-2.5 rounded-full bg-success/60" />
         <div className="flex-1 mx-4 h-5 rounded bg-secondary/60 flex items-center px-3">
-          <span className="text-xs text-muted-foreground font-mono">app.cineforge.io/dashboard/create</span>
+          <span className="text-xs text-muted-foreground font-mono">app.synema.io/dashboard/create</span>
         </div>
       </div>
 
@@ -226,7 +226,7 @@ const FEATURES = [
   {
     icon: Zap,
     title: 'One-Click Generation',
-    description: 'From audio to finished clip in minutes. Provide a track, a prompt, and your style — CineForge handles everything else.',
+    description: 'From audio to finished clip in minutes. Provide a track, a prompt, and your style — Synema handles everything else.',
   },
   {
     icon: SlidersHorizontal,
@@ -309,7 +309,7 @@ const STEPS = [
   {
     number: '01',
     title: 'Upload or link your track',
-    description: 'Drop an audio file or paste a URL. CineForge ingests and analyzes the audio structure.',
+    description: 'Drop an audio file or paste a URL. Synema ingests and analyzes the audio structure.',
   },
   {
     number: '02',
@@ -319,7 +319,7 @@ const STEPS = [
   {
     number: '03',
     title: 'One click — generation begins',
-    description: 'CineForge segments the track, generates scene plans, dispatches image generation, and assembles the edit.',
+    description: 'Synema segments the track, generates scene plans, dispatches image generation, and assembles the edit.',
   },
   {
     number: '04',
@@ -343,7 +343,7 @@ function HowItWorksSection() {
               clip in minutes.
             </h2>
             <p className="text-muted-foreground text-lg leading-relaxed">
-              CineForge orchestrates every step of the production pipeline automatically.
+              Synema orchestrates every step of the production pipeline automatically.
               You provide creative direction. The platform handles the execution.
             </p>
           </div>
@@ -402,7 +402,7 @@ function NFTAccessSection() {
                 </div>
 
                 <div className="space-y-3 mb-6">
-                  {['CineForge Genesis Pass', 'Creative Collective #7', 'Founder Series'].map((nft, i) => (
+                  {['Synema Genesis Pass', 'Creative Collective #7', 'Founder Series'].map((nft, i) => (
                     <div key={nft} className="flex items-center gap-3 rounded-lg bg-secondary/30 border border-border/40 p-3">
                       <div className="w-8 h-8 rounded bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/10 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
@@ -436,7 +436,7 @@ function NFTAccessSection() {
               <span className="text-gradient-primary">token holders.</span>
             </h2>
             <p className="text-muted-foreground text-lg leading-relaxed mb-8">
-              CineForge rewards Web3 communities with exclusive access. Connect your wallet,
+              Synema rewards Web3 communities with exclusive access. Connect your wallet,
               verify NFT ownership, and unlock the full platform — no subscription required.
             </p>
 
@@ -621,7 +621,7 @@ function CTASection() {
             Ready to forge your vision?
           </h2>
           <p className="text-muted-foreground text-lg mb-8 max-w-md mx-auto">
-            Join thousands of artists using CineForge to create cinematic music videos at scale.
+            Join thousands of artists using Synema to create cinematic music videos at scale.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button

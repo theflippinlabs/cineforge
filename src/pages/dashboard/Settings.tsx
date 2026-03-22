@@ -159,7 +159,7 @@ export default function Settings() {
       {/* Danger zone */}
       <div className="rounded-xl border border-destructive/20 bg-destructive/3 p-6">
         <h2 className="font-semibold text-foreground mb-1">Sign Out</h2>
-        <p className="text-sm text-muted-foreground mb-4">Sign out of your CineForge account.</p>
+        <p className="text-sm text-muted-foreground mb-4">Sign out of your Synema account.</p>
         <Button variant="outline" size="sm" onClick={handleSignOut} className="border-destructive/30 text-destructive hover:bg-destructive/5">
           Sign Out
         </Button>

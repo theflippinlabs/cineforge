@@ -1,4 +1,4 @@
-# CineForge
+# Synema
 
 **AI-powered music video creation platform.**
 
