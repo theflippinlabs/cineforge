@@ -38,22 +38,24 @@ insert into nft_access_rules (
   is_active,
   description
 ) values (
-  '0xe5c2f750491fc5043d8d011c34a3adb0ef900cf3',
+  '0xE5c2F750491fc5043d8D011C34A3adB0Ef900cF3',
   25,
   'Cronos',
-  'Synema Access Pass',
-  'Synema Access Pass',
+  'The Sovereign',
+  'The Sovereign',
   'ERC-721',
   'nft_verified',
   1,
   1,
   true,
-  'Hold this NFT on Cronos to unlock full platform access.'
+  'Hold The Sovereign NFT on Cronos to unlock full platform access.'
 )
 on conflict (contract_address, chain_id) do update set
+  collection_name = 'The Sovereign',
+  name = 'The Sovereign',
   is_active = true,
   tier_unlocked = 'nft_verified',
   chain = 'Cronos',
   token_standard = 'ERC-721',
   required_balance = 1,
-  description = 'Hold this NFT on Cronos to unlock full platform access.';
+  description = 'Hold The Sovereign NFT on Cronos to unlock full platform access.';
