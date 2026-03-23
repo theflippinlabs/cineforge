@@ -326,6 +326,9 @@ export interface ProjectConfig {
   quality_guardrails: boolean;
   reference_image_url: string | null;
   render_profile_id: string | null;
+  /** Public URLs of character reference images (max 4). When present, the pipeline
+   *  uses kling_image_to_video and rotates through these images across scenes. */
+  character_image_urls: string[] | null;
 }
 
 /** Which AI providers are used at each stage of the pipeline */

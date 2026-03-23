@@ -184,6 +184,8 @@ export async function dispatchVisualGeneration(
   await updateStep(job.id, 'scene_generation', { status: 'running' });
 
   const config = job.config_snapshot;
+  const characterImages = config.character_image_urls ?? [];
+  const hasCharacters = characterImages.length > 0;
 
   // Cap number of generated clips to limit cost (~$0.35–0.70 per clip at $0.07/sec)
   const MAX_SCENES = 6;
@@ -198,20 +200,27 @@ export async function dispatchVisualGeneration(
       progress: 55 + Math.round((i / scenes.length) * 25),
     });
     await logStep(job.id, 'scene_generation', 'info',
-      `Generating scene ${i + 1}/${scenes.length} (${scene.section_type})`);
+      `Generating scene ${i + 1}/${scenes.length} (${scene.section_type})${hasCharacters ? ' [with character reference]' : ''}`);
 
     try {
       const prompt = `${scene.positive_prompt}, ${scene.shot_instruction}`.slice(0, 500);
       const negativePrompt = scene.negative_prompt.slice(0, 200);
+      const duration = snapDuration(scene.duration_seconds);
+      const aspect_ratio = mapAspectRatio(config.aspect_ratio);
 
-      const result = await fal.subscribe(FAL_MODELS.kling_text_to_video, {
-        input: {
-          prompt,
-          negative_prompt: negativePrompt,
-          duration: snapDuration(scene.duration_seconds),
-          aspect_ratio: mapAspectRatio(config.aspect_ratio),
-        },
-      }) as KlingVideoOutput;
+      // Rotate through character images across scenes for visual variety
+      // e.g. scene 0 → char[0], scene 1 → char[1 % n], scene 2 → char[2 % n]
+      const characterImageUrl = hasCharacters
+        ? characterImages[i % characterImages.length]
+        : null;
+
+      const result = characterImageUrl
+        ? await fal.subscribe(FAL_MODELS.kling_image_to_video, {
+            input: { image_url: characterImageUrl, prompt, negative_prompt: negativePrompt, duration, aspect_ratio },
+          }) as KlingVideoOutput
+        : await fal.subscribe(FAL_MODELS.kling_text_to_video, {
+            input: { prompt, negative_prompt: negativePrompt, duration, aspect_ratio },
+          }) as KlingVideoOutput;
 
       const videoUrl = result.video.url;
       sceneUrls.push(videoUrl);
@@ -232,6 +241,7 @@ export async function dispatchVisualGeneration(
           scene_index: i,
           section_type: scene.section_type,
           fal_file_name: result.video.file_name,
+          character_reference_url: characterImageUrl ?? null,
         },
       });
 
@@ -276,7 +286,7 @@ export async function assembleEdit(
     color_grade: getCinematicModeGrade(job.config_snapshot.cinematic_mode),
   };
 
-  await logStep(job.id, 'clip_stitching', 'info', `Assembled ${sceneIds.length} clips`);
+  await logStep(job.id, 'clip_stitching', 'info', `Assembled ${sceneUrls.length} clips`);
   await updateStep(job.id, 'clip_stitching', { status: 'completed', progress: 100 });
 
   if (job.config_snapshot.has_subtitles) {

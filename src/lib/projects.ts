@@ -100,6 +100,28 @@ export async function deleteProject(projectId: string, userId: string) {
   return { error };
 }
 
+/**
+ * Upload a character reference image to Supabase Storage.
+ * The public URL is stored in config_snapshot.character_image_urls
+ * and passed to fal.ai as the image-to-video reference frame.
+ */
+export async function uploadCharacterImage(
+  file: File,
+  userId: string
+): Promise<{ url: string | null; error: Error | null }> {
+  const ext = file.name.split('.').pop();
+  const filename = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+
+  const { error } = await supabase.storage
+    .from('character-references')
+    .upload(filename, file, { upsert: false });
+
+  if (error) return { url: null, error: new Error(error.message) };
+
+  const { data } = supabase.storage.from('character-references').getPublicUrl(filename);
+  return { url: data.publicUrl, error: null };
+}
+
 export async function uploadAudio(file: File, userId: string): Promise<{ url: string | null; error: Error | null }> {
   const ext = file.name.split('.').pop();
   const filename = `${userId}/${Date.now()}.${ext}`;
