@@ -46,7 +46,7 @@ function HeroSection() {
       <div className="relative max-w-7xl mx-auto px-6 py-24 text-center">
         <div className="animate-slide-up">
           <div className="flex justify-center mb-8">
-            <LogoMark className="w-36 h-36" />
+            <LogoMark className="w-24 h-24 md:w-36 h-36 lg:w-48 lg:h-48" />
           </div>
 
           <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight leading-[1.05] mb-8">
