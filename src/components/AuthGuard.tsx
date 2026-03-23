@@ -3,8 +3,11 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Film } from 'lucide-react';
 
+// Pages accessible without NFT verification (so users can connect wallet)
+const NFT_EXEMPT_PATHS = ['/dashboard/wallet', '/dashboard/settings'];
+
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, accessStatus } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -22,6 +25,18 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   if (!user) {
     return <Navigate to="/auth/login" state={{ from: location }} replace />;
+  }
+
+  // NFT gate: only verified holders and admins can access the dashboard
+  // Fail open if accessStatus couldn't be loaded (null)
+  const isExemptPath = NFT_EXEMPT_PATHS.includes(location.pathname);
+  const hasNFTAccess =
+    !accessStatus ||
+    accessStatus.nftVerified ||
+    accessStatus.tier === 'admin';
+
+  if (!hasNFTAccess && !isExemptPath) {
+    return <Navigate to="/dashboard/wallet" state={{ nftRequired: true }} replace />;
   }
 
   return <>{children}</>;

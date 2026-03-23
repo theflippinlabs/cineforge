@@ -183,6 +183,11 @@ export default function CreateClip() {
     e.preventDefault();
     if (!user) return;
 
+    if (!isPremium && accessStatus && accessStatus.generationsRemaining <= 0) {
+      setError('You have reached your free generation limit. Connect a wallet with an eligible NFT to unlock unlimited generations.');
+      return;
+    }
+
     if (!conceptPrompt.trim()) { setError('A concept prompt is required.'); return; }
     if (audioTab === 'upload' && !audioFile) { setError('Upload an audio file or switch to URL input.'); return; }
     if (audioTab === 'url' && !audioUrl.trim()) { setError('Provide an audio URL.'); return; }
@@ -233,10 +238,30 @@ export default function CreateClip() {
   return (
     <div className="p-6 lg:p-8 max-w-3xl mx-auto">
       <div className="mb-8">
-        <h1 className="font-display text-2xl font-bold text-foreground tracking-tight">New Clip</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Define the creative direction. The pipeline handles the rest.
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="font-display text-2xl font-bold text-foreground tracking-tight">New Clip</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Define the creative direction. The pipeline handles the rest.
+            </p>
+          </div>
+          {!isPremium && accessStatus && (
+            <div className={cn(
+              'flex-shrink-0 rounded-lg border px-3 py-2 text-right',
+              accessStatus.generationsRemaining <= 0
+                ? 'border-destructive/30 bg-destructive/5'
+                : 'border-border/50 bg-secondary/20'
+            )}>
+              <p className={cn(
+                'text-sm font-semibold tabular-nums',
+                accessStatus.generationsRemaining <= 0 ? 'text-destructive' : 'text-foreground'
+              )}>
+                {accessStatus.generationsRemaining} / {accessStatus.generationsTotal}
+              </p>
+              <p className="text-xs text-muted-foreground">generations left</p>
+            </div>
+          )}
+        </div>
       </div>
 
       {error && (

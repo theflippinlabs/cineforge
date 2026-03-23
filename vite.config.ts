@@ -1,9 +1,17 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
+import { nodePolyfills } from "vite-plugin-node-polyfills";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // Required for @walletconnect/sign-client (uses Buffer, process, etc.)
+    nodePolyfills({
+      globals: { Buffer: true, process: true, global: true },
+      protocolImports: true,
+    }),
+  ],
 
   resolve: {
     alias: {

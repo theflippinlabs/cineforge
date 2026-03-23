@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Wallet as WalletIcon,
   Shield,
@@ -10,11 +11,11 @@ import {
   Plus,
   Sparkles,
   Lock,
-  ArrowRight,
+  KeyRound,
 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
+import { Card, CardContent } from '../../components/ui/card';
 import { Separator } from '../../components/ui/separator';
 import { Alert, AlertDescription } from '../../components/ui/alert';
 import { useAuth } from '../../contexts/AuthContext';
@@ -24,45 +25,36 @@ import {
   getWallets,
   unlinkWallet,
   verifyNFTOwnership,
+  getNFTAccessRules,
 } from '../../lib/wallet';
-import type { Wallet } from '../../types';
+import { getAppKit } from '../../lib/walletconnect';
+import type { Wallet, NFTAccessRule } from '../../types';
 import { cn } from '../../lib/utils';
-
-const NFT_COLLECTIONS = [
-  {
-    name: 'Synema Genesis Pass',
-    contract: '0x1234...abcd',
-    chain: 'Ethereum',
-    tier: 'premium',
-    description: 'Original founding collection. Unlocks full platform access.',
-  },
-  {
-    name: 'Creative Collective',
-    contract: '0x5678...efgh',
-    chain: 'Polygon',
-    tier: 'pro',
-    description: 'Community artists collection. Unlocks Pro tier features.',
-  },
-  {
-    name: 'Founder Series',
-    contract: '0x9abc...ijkl',
-    chain: 'Ethereum',
-    tier: 'premium',
-    description: 'Limited edition founders. Unlocks enterprise-level access.',
-  },
-];
 
 export default function WalletPage() {
   const { user, accessStatus, refreshAccessStatus } = useAuth();
+  const location = useLocation();
+  const nftRequired = (location.state as { nftRequired?: boolean } | null)?.nftRequired === true;
+
   const [wallets, setWallets] = useState<Wallet[]>([]);
+  const [nftRules, setNftRules] = useState<NFTAccessRule[]>([]);
+  const [nftStatuses, setNftStatuses] = useState<Record<string, boolean>>({});
   const [connecting, setConnecting] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const cleanupRef = useRef<Array<() => void>>([]);
 
   useEffect(() => {
     if (user?.id) loadWallets();
+    loadNftRules();
+    return () => { cleanupRef.current.forEach(fn => fn()); };
   }, [user?.id]);
+
+  const loadNftRules = async () => {
+    const rules = await getNFTAccessRules();
+    setNftRules(rules);
+  };
 
   const loadWallets = async () => {
     if (!user) return;
@@ -70,27 +62,64 @@ export default function WalletPage() {
     if (data) setWallets(data);
   };
 
-  const handleConnect = async () => {
+  const saveWallet = async (address: string, chainId: number) => {
+    if (!user) return;
+    const { data, error } = await linkWallet(user.id, address, chainId);
+    if (error) {
+      setError(error.message);
+    } else if (data) {
+      setSuccess(`Wallet ${address.slice(0, 6)}...${address.slice(-4)} connecté.`);
+      await loadWallets();
+      await refreshAccessStatus();
+    }
+  };
+
+  // Reown AppKit modal (WalletConnect + browser wallets, desktop & mobile)
+  const handleConnect = () => {
     if (!user) return;
     setError(null);
     setConnecting(true);
 
+    let kit: ReturnType<typeof getAppKit>;
     try {
-      const result = await connectBrowserWallet();
-      const { data, error } = await linkWallet(user.id, result.address, result.chainId);
-
-      if (error) {
-        setError(error.message);
-      } else if (data) {
-        setSuccess(`Wallet ${result.address.slice(0, 6)}...${result.address.slice(-4)} connected successfully.`);
-        await loadWallets();
-        await refreshAccessStatus();
-      }
+      kit = getAppKit();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to connect wallet.');
-    } finally {
+      setError(err instanceof Error ? err.message : 'Erreur WalletConnect.');
       setConnecting(false);
+      return;
     }
+
+    const unsubs: Array<() => void> = [];
+    let settled = false;
+
+    const finish = () => {
+      settled = true;
+      unsubs.forEach(fn => fn());
+      cleanupRef.current = cleanupRef.current.filter(fn => !unsubs.includes(fn));
+      setConnecting(false);
+    };
+
+    const unsubAccount = kit.subscribeAccount(async (account) => {
+      if (settled) return;
+      if (account.isConnected && account.address) {
+        finish();
+        await saveWallet(account.address, account.chainId ?? 25);
+      }
+    });
+    unsubs.push(unsubAccount);
+    cleanupRef.current.push(unsubAccount);
+
+    const unsubState = kit.subscribeState((state: { open: boolean }) => {
+      if (settled) return;
+      if (!state.open) {
+        // Short delay lets subscribeAccount fire first if both fire together
+        setTimeout(() => { if (!settled) finish(); }, 300);
+      }
+    });
+    unsubs.push(unsubState);
+    cleanupRef.current.push(unsubState);
+
+    kit.open();
   };
 
   const handleUnlink = async (walletId: string) => {
@@ -106,11 +135,24 @@ export default function WalletPage() {
     if (!user || wallets.length === 0) return;
     setVerifying(true);
     setError(null);
-
     try {
-      await Promise.all(wallets.map((w) => verifyNFTOwnership(w.address, w.chain_id)));
+      const allResults = await Promise.all(
+        wallets.map((w) => verifyNFTOwnership(w.address, w.id))
+      );
+      const merged: Record<string, boolean> = {};
+      for (const results of allResults) {
+        for (const r of results) {
+          merged[r.rule_id] = merged[r.rule_id] || r.is_eligible;
+        }
+      }
+      setNftStatuses(merged);
       await refreshAccessStatus();
-      setSuccess('NFT verification completed.');
+      const verifiedCount = Object.values(merged).filter(Boolean).length;
+      setSuccess(
+        verifiedCount > 0
+          ? `Verification complete — ${verifiedCount} eligible collection${verifiedCount > 1 ? 's' : ''} found.`
+          : 'Verification complete — no eligible NFTs found in connected wallets.'
+      );
     } catch {
       setError('Verification failed. Please try again.');
     } finally {
@@ -118,8 +160,7 @@ export default function WalletPage() {
     }
   };
 
-  const truncateAddress = (addr: string) =>
-    `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+  const truncateAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 
   return (
     <div className="p-6 lg:p-8 max-w-4xl mx-auto space-y-8">
@@ -127,9 +168,24 @@ export default function WalletPage() {
       <div>
         <h1 className="font-display text-2xl font-bold text-foreground tracking-tight">Wallet & Access</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Connect your wallet and verify NFT ownership to unlock premium features.
+          Connect your Cronos wallet and verify NFT ownership to unlock access.
         </p>
       </div>
+
+      {/* NFT access required notice */}
+      {nftRequired && !accessStatus?.nftVerified && (
+        <div className="rounded-xl border border-primary/30 bg-primary/5 p-5 flex items-start gap-4">
+          <div className="w-9 h-9 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
+            <KeyRound className="w-4 h-4 text-primary" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-foreground mb-0.5">Accès réservé aux détenteurs du NFT</p>
+            <p className="text-sm text-muted-foreground">
+              Connectez votre wallet Cronos et vérifiez la possession du NFT pour accéder à la plateforme.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Feedback */}
       {error && (
@@ -146,20 +202,13 @@ export default function WalletPage() {
       )}
 
       {/* Access status card */}
-      <Card className={cn(
-        'border',
-        accessStatus?.nftVerified
-          ? 'border-primary/30 bg-primary/3'
-          : 'border-border/50 bg-card/40'
-      )}>
+      <Card className={cn('border', accessStatus?.nftVerified ? 'border-primary/30 bg-primary/3' : 'border-border/50 bg-card/40')}>
         <CardContent className="p-6">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-start gap-4">
               <div className={cn(
                 'w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0',
-                accessStatus?.nftVerified
-                  ? 'bg-primary/10 border border-primary/25'
-                  : 'bg-secondary border border-border'
+                accessStatus?.nftVerified ? 'bg-primary/10 border border-primary/25' : 'bg-secondary border border-border'
               )}>
                 {accessStatus?.nftVerified ? (
                   <Sparkles className="w-6 h-6 text-primary" />
@@ -170,25 +219,18 @@ export default function WalletPage() {
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <h3 className="font-semibold text-foreground">
-                    {accessStatus?.nftVerified ? 'Premium Access Active' : 'Free Tier'}
+                    {accessStatus?.nftVerified ? 'Accès débloqué' : 'Accès verrouillé'}
                   </h3>
-                  <Badge
-                    className={cn(
-                      'text-xs',
-                      accessStatus?.nftVerified
-                        ? 'bg-primary/10 text-primary border-primary/20'
-                        : 'bg-secondary text-muted-foreground border-border'
-                    )}
-                  >
-                    {accessStatus?.nftVerified ? 'NFT Verified' : 'Free'}
+                  <Badge className={cn('text-xs', accessStatus?.nftVerified ? 'bg-primary/10 text-primary border-primary/20' : 'bg-secondary text-muted-foreground border-border')}>
+                    {accessStatus?.nftVerified ? 'NFT Vérifié' : 'Non vérifié'}
                   </Badge>
                 </div>
                 <p className="text-sm text-muted-foreground">
                   {accessStatus?.nftVerified
-                    ? 'You have full access to all Synema features, unlimited generations, and priority rendering.'
-                    : 'Connect a wallet holding a valid NFT to unlock premium features, or upgrade to Pro.'}
+                    ? 'Vous avez accès complet à la plateforme Synema.'
+                    : 'Connectez un wallet détenant le NFT Synema Access Pass sur Cronos.'}
                 </p>
-                {accessStatus && (
+                {accessStatus?.nftVerified && (
                   <div className="flex flex-wrap gap-2 mt-3">
                     {accessStatus.unlockedFeatures.map((feature) => (
                       <Badge key={feature} variant="outline" className="text-xs border-border/60 font-mono">
@@ -199,11 +241,10 @@ export default function WalletPage() {
                 )}
               </div>
             </div>
-
             {accessStatus?.nftVerified && (
               <Button variant="outline" size="sm" onClick={handleVerify} disabled={verifying}>
                 <RefreshCw className={cn('mr-2 h-3.5 w-3.5', verifying && 'animate-spin')} />
-                {verifying ? 'Verifying...' : 'Refresh'}
+                {verifying ? 'Vérification...' : 'Rafraîchir'}
               </Button>
             )}
           </div>
@@ -214,19 +255,24 @@ export default function WalletPage() {
       <div>
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="font-semibold text-foreground">Connected Wallets</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Ethereum-compatible wallets</p>
+            <h2 className="font-semibold text-foreground">Wallets connectés</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Wallets compatibles Cronos (EVM)</p>
           </div>
-          <Button size="sm" onClick={handleConnect} disabled={connecting} className="bg-primary/10 text-primary border border-primary/20 hover:bg-primary/15">
+          <Button
+            size="sm"
+            onClick={handleConnect}
+            disabled={connecting}
+            className="bg-primary/10 text-primary border border-primary/20 hover:bg-primary/15"
+          >
             {connecting ? (
               <div className="flex items-center gap-2">
                 <div className="w-3.5 h-3.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-                Connecting...
+                Connexion…
               </div>
             ) : (
               <div className="flex items-center gap-2">
                 <Plus className="h-3.5 w-3.5" />
-                Connect Wallet
+                Connecter
               </div>
             )}
           </Button>
@@ -235,22 +281,19 @@ export default function WalletPage() {
         {wallets.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border/40 bg-secondary/10 p-10 text-center">
             <WalletIcon className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
-            <p className="text-sm font-medium text-muted-foreground mb-1">No wallets connected</p>
-            <p className="text-xs text-muted-foreground/60 mb-4">
-              Connect a MetaMask or compatible wallet to get started.
+            <p className="text-sm font-medium text-muted-foreground mb-1">Aucun wallet connecté</p>
+            <p className="text-xs text-muted-foreground/60 mb-5">
+              Utilisez WalletConnect pour connecter MetaMask, DeFi Wallet, Trust Wallet ou tout wallet compatible Cronos.
             </p>
-            <Button size="sm" onClick={handleConnect} disabled={connecting} variant="outline">
+            <Button size="sm" onClick={handleConnect} disabled={connecting}>
               <WalletIcon className="mr-2 h-4 w-4" />
-              Connect Wallet
+              Connecter via WalletConnect
             </Button>
           </div>
         ) : (
           <div className="space-y-3">
             {wallets.map((wallet) => (
-              <div
-                key={wallet.id}
-                className="flex items-center gap-4 rounded-xl border border-border/50 bg-card/40 p-4"
-              >
+              <div key={wallet.id} className="flex items-center gap-4 rounded-xl border border-border/50 bg-card/40 p-4">
                 <div className="w-9 h-9 rounded-lg bg-secondary/60 border border-border/40 flex items-center justify-center flex-shrink-0">
                   <WalletIcon className="w-4 h-4 text-muted-foreground" />
                 </div>
@@ -260,7 +303,7 @@ export default function WalletPage() {
                       {truncateAddress(wallet.address)}
                     </p>
                     {wallet.is_primary && (
-                      <Badge variant="outline" className="text-xs border-primary/20 text-primary">Primary</Badge>
+                      <Badge variant="outline" className="text-xs border-primary/20 text-primary">Principal</Badge>
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground">{wallet.chain_name}</p>
@@ -270,7 +313,7 @@ export default function WalletPage() {
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                    onClick={() => window.open(`https://etherscan.io/address/${wallet.address}`, '_blank')}
+                    onClick={() => window.open(`https://cronoscan.com/address/${wallet.address}`, '_blank')}
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
                   </Button>
@@ -288,7 +331,7 @@ export default function WalletPage() {
 
             <Button variant="outline" size="sm" onClick={handleVerify} disabled={verifying} className="w-full">
               <Shield className={cn('mr-2 h-4 w-4', verifying && 'animate-spin')} />
-              {verifying ? 'Verifying NFT ownership...' : 'Verify NFT Ownership'}
+              {verifying ? 'Vérification en cours…' : 'Vérifier la possession du NFT'}
             </Button>
           </div>
         )}
@@ -299,52 +342,52 @@ export default function WalletPage() {
       {/* Eligible collections */}
       <div>
         <div className="mb-5">
-          <h2 className="font-semibold text-foreground">Eligible Collections</h2>
+          <h2 className="font-semibold text-foreground">Collection éligible</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Holding NFTs from these collections unlocks premium access.
+            Détenir ce NFT sur Cronos débloque l'accès complet à la plateforme.
           </p>
         </div>
 
-        <div className="space-y-3">
-          {NFT_COLLECTIONS.map((collection) => (
-            <div
-              key={collection.name}
-              className="flex items-start gap-4 rounded-xl border border-border/40 bg-card/30 p-4"
-            >
-              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/15 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <p className="text-sm font-semibold text-foreground">{collection.name}</p>
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      'text-xs',
-                      collection.tier === 'premium'
-                        ? 'border-primary/30 text-primary'
-                        : 'border-border text-muted-foreground'
-                    )}
-                  >
-                    {collection.tier}
-                  </Badge>
+        {nftRules.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border/40 bg-secondary/10 p-8 text-center">
+            <p className="text-sm text-muted-foreground">Aucune collection configurée.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {nftRules.map((rule) => {
+              const hasBeenChecked = rule.id in nftStatuses;
+              const isEligible = nftStatuses[rule.id] === true;
+              return (
+                <div
+                  key={rule.id}
+                  className={cn('flex items-start gap-4 rounded-xl border bg-card/30 p-4', isEligible ? 'border-primary/30' : 'border-border/40')}
+                >
+                  <div className={cn('w-10 h-10 rounded-lg border flex-shrink-0', isEligible ? 'bg-primary/10 border-primary/20' : 'bg-gradient-to-br from-primary/20 to-primary/5 border-primary/15')} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                      <p className="text-sm font-semibold text-foreground">{rule.collection_name || rule.name}</p>
+                      <Badge variant="outline" className="text-xs border-primary/30 text-primary">
+                        {rule.tier_unlocked}
+                      </Badge>
+                      {hasBeenChecked && (
+                        isEligible ? (
+                          <span className="inline-flex items-center gap-1 text-xs bg-success/10 text-success border border-success/20 rounded-full px-2 py-0.5">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Vérifié
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground/50">Non détenu</span>
+                        )
+                      )}
+                    </div>
+                    {rule.description && <p className="text-xs text-muted-foreground mb-1">{rule.description}</p>}
+                    <p className="text-xs font-mono text-muted-foreground/60">
+                      {rule.contract_address} · {rule.chain} · {rule.token_standard}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground mb-1">{collection.description}</p>
-                <p className="text-xs font-mono text-muted-foreground/60">
-                  {collection.contract} · {collection.chain}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {!accessStatus?.nftVerified && (
-          <div className="mt-6 rounded-xl border border-border/40 bg-card/20 p-6 text-center">
-            <p className="text-sm text-muted-foreground mb-4">
-              Don't hold an eligible NFT? Upgrade to Pro for monthly access.
-            </p>
-            <Button variant="outline" size="sm">
-              View Pro Plans
-              <ArrowRight className="ml-2 h-3.5 w-3.5" />
-            </Button>
+              );
+            })}
           </div>
         )}
       </div>
