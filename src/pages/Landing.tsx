@@ -20,6 +20,7 @@ import {
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { PublicLayout } from '../components/layout/PublicLayout';
+import { LogoMark } from '../components/LogoMark';
 import { cn } from '../lib/utils';
 
 // ─── Hero Section ─────────────────────────────────────────────────────────────
@@ -44,13 +45,9 @@ function HeroSection() {
 
       <div className="relative max-w-7xl mx-auto px-6 py-24 text-center">
         <div className="animate-slide-up">
-          <Badge
-            variant="outline"
-            className="mb-8 border-primary/30 bg-primary/5 text-primary text-xs font-medium px-4 py-1.5 tracking-wide"
-          >
-            <Sparkles className="w-3 h-3 mr-1.5" />
-            AI-Powered Music Video Production
-          </Badge>
+          <div className="flex justify-center mb-8">
+            <LogoMark className="w-16 h-16" />
+          </div>
 
           <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight leading-[1.05] mb-8">
             <span className="text-gradient-cinematic">Turn music into</span>
