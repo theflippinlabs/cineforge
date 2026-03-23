@@ -2,7 +2,7 @@ import { cn } from '../lib/utils';
 
 export function LogoMark({ className }: { className?: string }) {
   return (
-    <div className={cn('w-7 h-7 flex items-center justify-center flex-shrink-0', className)}>
+    <div className={cn('w-10 h-10 flex items-center justify-center flex-shrink-0', className)}>
       <img src="/logo.png" alt="Synema" className="w-full h-full object-contain" />
     </div>
   );
