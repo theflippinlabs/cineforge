@@ -9,6 +9,59 @@ export const CHAIN_NAMES: Record<number, string> = {
   10: 'Optimism',
 };
 
+const PUBLIC_RPC_URLS: Record<number, string> = {
+  1: 'https://eth.llamarpc.com',
+  137: 'https://polygon-rpc.com',
+  42161: 'https://arb1.arbitrum.io/rpc',
+  8453: 'https://mainnet.base.org',
+  10: 'https://mainnet.optimism.io',
+};
+
+async function rpcEthCall(chainId: number, to: string, data: string): Promise<string> {
+  const url = PUBLIC_RPC_URLS[chainId];
+  if (!url) return '0x';
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'eth_call',
+        params: [{ to, data }, 'latest'],
+        id: 1,
+      }),
+    });
+    const json = await res.json();
+    return (json.result as string) ?? '0x';
+  } catch {
+    return '0x';
+  }
+}
+
+async function getERC721Balance(contractAddress: string, walletAddress: string, chainId: number): Promise<number> {
+  // balanceOf(address) selector: 0x70a08231
+  const paddedAddr = walletAddress.toLowerCase().replace('0x', '').padStart(64, '0');
+  const result = await rpcEthCall(chainId, contractAddress, `0x70a08231${paddedAddr}`);
+  if (!result || result === '0x') return 0;
+  return parseInt(result, 16) || 0;
+}
+
+async function getERC1155Balance(contractAddress: string, walletAddress: string, chainId: number): Promise<number> {
+  // balanceOf(address, uint256) selector: 0x00fdd58e
+  // Check token IDs 0, 1, 2 — common for membership-style ERC-1155 collections
+  const paddedAddr = walletAddress.toLowerCase().replace('0x', '').padStart(64, '0');
+  let maxBalance = 0;
+  for (const tokenId of [0, 1, 2]) {
+    const paddedId = tokenId.toString(16).padStart(64, '0');
+    const result = await rpcEthCall(chainId, contractAddress, `0x00fdd58e${paddedAddr}${paddedId}`);
+    if (result && result !== '0x') {
+      const balance = parseInt(result, 16) || 0;
+      if (balance > maxBalance) maxBalance = balance;
+    }
+  }
+  return maxBalance;
+}
+
 // ─── Wallet Management ────────────────────────────────────────────────────────
 
 export async function linkWallet(
@@ -78,19 +131,54 @@ export async function getNFTAccessRules(): Promise<NFTAccessRule[]> {
 
 export async function verifyNFTOwnership(
   walletAddress: string,
-  _chainId: number = 1
+  walletId?: string
 ): Promise<WalletNFTStatus[]> {
-  // Production: replace with real on-chain RPC or NFT indexer (Alchemy, Moralis)
   const rules = await getNFTAccessRules();
-  return rules.map((rule) => ({
-    id: `mock-${rule.id}`,
-    wallet_id: walletAddress,
-    rule_id: rule.id,
-    is_eligible: false,
-    token_ids: [],
-    last_verified_at: new Date().toISOString(),
-    rule,
-  }));
+
+  const results = await Promise.all(
+    rules.map(async (rule) => {
+      const balance =
+        rule.token_standard === 'ERC-1155'
+          ? await getERC1155Balance(rule.contract_address, walletAddress, rule.chain_id)
+          : await getERC721Balance(rule.contract_address, walletAddress, rule.chain_id);
+
+      const isEligible = balance >= rule.required_balance;
+
+      if (walletId) {
+        await supabase.from('wallet_nft_status').upsert(
+          {
+            wallet_id: walletId,
+            rule_id: rule.id,
+            is_eligible: isEligible,
+            verified_balance: balance,
+            token_ids: [],
+            last_checked_at: new Date().toISOString(),
+          },
+          { onConflict: 'wallet_id,rule_id' }
+        );
+      }
+
+      return {
+        id: walletId ? `${walletId}-${rule.id}` : `nft-${rule.id}`,
+        wallet_id: walletId ?? walletAddress,
+        rule_id: rule.id,
+        is_eligible: isEligible,
+        verified_balance: balance,
+        token_ids: [],
+        last_checked_at: new Date().toISOString(),
+        rule,
+      } as WalletNFTStatus;
+    })
+  );
+
+  if (walletId) {
+    await supabase
+      .from('wallets')
+      .update({ last_verified_at: new Date().toISOString() })
+      .eq('id', walletId);
+  }
+
+  return results;
 }
 
 export async function getWalletNFTStatus(walletId: string): Promise<WalletNFTStatus[]> {

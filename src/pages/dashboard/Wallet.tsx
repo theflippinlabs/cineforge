@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
+import { Card, CardContent } from '../../components/ui/card';
 import { Separator } from '../../components/ui/separator';
 import { Alert, AlertDescription } from '../../components/ui/alert';
 import { useAuth } from '../../contexts/AuthContext';
@@ -24,37 +24,16 @@ import {
   getWallets,
   unlinkWallet,
   verifyNFTOwnership,
+  getNFTAccessRules,
 } from '../../lib/wallet';
-import type { Wallet } from '../../types';
+import type { Wallet, NFTAccessRule } from '../../types';
 import { cn } from '../../lib/utils';
-
-const NFT_COLLECTIONS = [
-  {
-    name: 'Synema Genesis Pass',
-    contract: '0x1234...abcd',
-    chain: 'Ethereum',
-    tier: 'premium',
-    description: 'Original founding collection. Unlocks full platform access.',
-  },
-  {
-    name: 'Creative Collective',
-    contract: '0x5678...efgh',
-    chain: 'Polygon',
-    tier: 'pro',
-    description: 'Community artists collection. Unlocks Pro tier features.',
-  },
-  {
-    name: 'Founder Series',
-    contract: '0x9abc...ijkl',
-    chain: 'Ethereum',
-    tier: 'premium',
-    description: 'Limited edition founders. Unlocks enterprise-level access.',
-  },
-];
 
 export default function WalletPage() {
   const { user, accessStatus, refreshAccessStatus } = useAuth();
   const [wallets, setWallets] = useState<Wallet[]>([]);
+  const [nftRules, setNftRules] = useState<NFTAccessRule[]>([]);
+  const [nftStatuses, setNftStatuses] = useState<Record<string, boolean>>({});
   const [connecting, setConnecting] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +41,13 @@ export default function WalletPage() {
 
   useEffect(() => {
     if (user?.id) loadWallets();
+    loadNftRules();
   }, [user?.id]);
+
+  const loadNftRules = async () => {
+    const rules = await getNFTAccessRules();
+    setNftRules(rules);
+  };
 
   const loadWallets = async () => {
     if (!user) return;
@@ -108,9 +93,24 @@ export default function WalletPage() {
     setError(null);
 
     try {
-      await Promise.all(wallets.map((w) => verifyNFTOwnership(w.address, w.chain_id)));
+      const allResults = await Promise.all(
+        wallets.map((w) => verifyNFTOwnership(w.address, w.id))
+      );
+      const merged: Record<string, boolean> = {};
+      for (const results of allResults) {
+        for (const r of results) {
+          // If any wallet holds the NFT, mark it eligible
+          merged[r.rule_id] = merged[r.rule_id] || r.is_eligible;
+        }
+      }
+      setNftStatuses(merged);
       await refreshAccessStatus();
-      setSuccess('NFT verification completed.');
+      const verifiedCount = Object.values(merged).filter(Boolean).length;
+      setSuccess(
+        verifiedCount > 0
+          ? `NFT verification complete. ${verifiedCount} eligible collection${verifiedCount > 1 ? 's' : ''} found.`
+          : 'NFT verification complete. No eligible NFTs found in connected wallets.'
+      );
     } catch {
       setError('Verification failed. Please try again.');
     } finally {
@@ -305,36 +305,68 @@ export default function WalletPage() {
           </p>
         </div>
 
-        <div className="space-y-3">
-          {NFT_COLLECTIONS.map((collection) => (
-            <div
-              key={collection.name}
-              className="flex items-start gap-4 rounded-xl border border-border/40 bg-card/30 p-4"
-            >
-              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/15 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <p className="text-sm font-semibold text-foreground">{collection.name}</p>
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      'text-xs',
-                      collection.tier === 'premium'
-                        ? 'border-primary/30 text-primary'
-                        : 'border-border text-muted-foreground'
+        {nftRules.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border/40 bg-secondary/10 p-8 text-center">
+            <p className="text-sm text-muted-foreground">No NFT collections configured yet.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {nftRules.map((rule) => {
+              const hasBeenChecked = rule.id in nftStatuses;
+              const isEligible = nftStatuses[rule.id] === true;
+              return (
+                <div
+                  key={rule.id}
+                  className={cn(
+                    'flex items-start gap-4 rounded-xl border bg-card/30 p-4',
+                    isEligible ? 'border-primary/30' : 'border-border/40'
+                  )}
+                >
+                  <div className={cn(
+                    'w-10 h-10 rounded-lg border flex-shrink-0',
+                    isEligible
+                      ? 'bg-primary/10 border-primary/20'
+                      : 'bg-gradient-to-br from-primary/20 to-primary/5 border-primary/15'
+                  )} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                      <p className="text-sm font-semibold text-foreground">
+                        {rule.collection_name || rule.name}
+                      </p>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          'text-xs',
+                          rule.tier_unlocked === 'premium'
+                            ? 'border-primary/30 text-primary'
+                            : 'border-border text-muted-foreground'
+                        )}
+                      >
+                        {rule.tier_unlocked}
+                      </Badge>
+                      {hasBeenChecked && (
+                        isEligible ? (
+                          <span className="inline-flex items-center gap-1 text-xs bg-success/10 text-success border border-success/20 rounded-full px-2 py-0.5">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Verified
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground/50">Not held</span>
+                        )
+                      )}
+                    </div>
+                    {rule.description && (
+                      <p className="text-xs text-muted-foreground mb-1">{rule.description}</p>
                     )}
-                  >
-                    {collection.tier}
-                  </Badge>
+                    <p className="text-xs font-mono text-muted-foreground/60">
+                      {rule.contract_address} · {rule.chain} · {rule.token_standard}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground mb-1">{collection.description}</p>
-                <p className="text-xs font-mono text-muted-foreground/60">
-                  {collection.contract} · {collection.chain}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
+              );
+            })}
+          </div>
+        )}
 
         {!accessStatus?.nftVerified && (
           <div className="mt-6 rounded-xl border border-border/40 bg-card/20 p-6 text-center">
