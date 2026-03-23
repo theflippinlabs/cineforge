@@ -291,6 +291,7 @@ export default function CreateClip() {
       has_subtitles: hasSubtitles,
       has_style_lock: hasStyleLock,
       quality_guardrails: enableGuardrails,
+      audio_url: resolvedAudioUrl,
       reference_image_url: null,
       render_profile_id: null,
       character_image_urls: characterImageUrls.length > 0 ? characterImageUrls : null,

@@ -315,6 +315,8 @@ export interface ProjectConfig {
   duration_seconds: number;
   scene_density: SceneDensity;
   realism_level: number;
+  /** Public URL of the uploaded audio track — used by analyze-audio Edge Function. */
+  audio_url: string | null;
   camera_language: CameraLanguage;
   shot_language: ShotLanguage;
   editing_intensity: EditingIntensity;
