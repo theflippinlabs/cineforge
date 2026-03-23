@@ -3,6 +3,7 @@ import type { Wallet, WalletNFTStatus, AccessStatus, NFTAccessRule } from '../ty
 
 export const CHAIN_NAMES: Record<number, string> = {
   1: 'Ethereum Mainnet',
+  25: 'Cronos',
   137: 'Polygon',
   42161: 'Arbitrum One',
   8453: 'Base',
@@ -11,6 +12,7 @@ export const CHAIN_NAMES: Record<number, string> = {
 
 const PUBLIC_RPC_URLS: Record<number, string> = {
   1: 'https://eth.llamarpc.com',
+  25: 'https://evm.cronos.org',
   137: 'https://polygon-rpc.com',
   42161: 'https://arb1.arbitrum.io/rpc',
   8453: 'https://mainnet.base.org',
