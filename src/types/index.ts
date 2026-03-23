@@ -293,7 +293,7 @@ export interface GenerationOutput {
   id: string;
   job_id: string;
   project_id: string;
-  output_type: 'preview' | 'final' | 'thumbnail' | 'storyboard';
+  output_type: 'preview' | 'final' | 'thumbnail' | 'storyboard' | 'scene_clip';
   file_url: string;
   file_size_bytes: number;
   duration_seconds: number;

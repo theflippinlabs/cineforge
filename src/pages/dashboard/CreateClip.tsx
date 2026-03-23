@@ -15,8 +15,9 @@ import { Alert, AlertDescription } from '../../components/ui/alert';
 import { Separator } from '../../components/ui/separator';
 import { Badge } from '../../components/ui/badge';
 import { useAuth } from '../../contexts/AuthContext';
-import { createProject } from '../../lib/projects';
-import { createGenerationJob } from '../../lib/jobs';
+import { createProject, uploadAudio } from '../../lib/projects';
+import { createGenerationJob, createGenerationSteps } from '../../lib/jobs';
+import { runPipeline } from '../../lib/pipeline';
 import { PROMPT_PRESETS, VISUAL_STYLE_LABELS, MOOD_LABELS, PACING_LABELS } from '../../lib/presets';
 import { CINEMATIC_MODES, SHOT_LANGUAGES } from '../../lib/quality';
 import type {
@@ -195,6 +196,19 @@ export default function CreateClip() {
     setError(null);
     setLoading(true);
 
+    // 1 — Upload audio file to Supabase Storage (if file mode)
+    let resolvedAudioUrl: string | null = audioTab === 'url' ? audioUrl : null;
+    if (audioTab === 'upload' && audioFile) {
+      const { url, error: uploadError } = await uploadAudio(audioFile, user.id);
+      if (uploadError || !url) {
+        setError(uploadError?.message ?? 'Audio upload failed.');
+        setLoading(false);
+        return;
+      }
+      resolvedAudioUrl = url;
+    }
+
+    // 2 — Create project
     const { data: project, error: projError } = await createProject(user.id, {
       title: title.trim() || `${VISUAL_STYLE_LABELS[visualStyle]} — ${new Date().toLocaleDateString()}`,
       concept_prompt: conceptPrompt,
@@ -215,7 +229,7 @@ export default function CreateClip() {
       has_style_lock: hasStyleLock,
       quality_guardrails: enableGuardrails,
       lyrics: lyrics || null,
-      audio_url: audioTab === 'url' ? audioUrl : null,
+      audio_url: resolvedAudioUrl,
     });
 
     if (projError || !project) {
@@ -224,7 +238,31 @@ export default function CreateClip() {
       return;
     }
 
-    const { data: job, error: jobError } = await createGenerationJob(project.id, user.id);
+    // 3 — Build the config snapshot that travels with every generation job
+    const config = {
+      concept_prompt: conceptPrompt,
+      visual_style: visualStyle,
+      mood,
+      pacing,
+      aspect_ratio: aspectRatio,
+      duration_seconds: durationSeconds,
+      scene_density: sceneDensity,
+      realism_level: realismLevel,
+      camera_language: cameraLanguage,
+      shot_language: shotLanguage,
+      editing_intensity: editingIntensity,
+      cinematic_mode: cinematicMode,
+      negative_prompt: negativePrompt || null,
+      has_brand_overlay: hasBrandOverlay,
+      has_subtitles: hasSubtitles,
+      has_style_lock: hasStyleLock,
+      quality_guardrails: enableGuardrails,
+      reference_image_url: null,
+      render_profile_id: null,
+    };
+
+    // 4 — Create job + pipeline steps
+    const { data: job, error: jobError } = await createGenerationJob(project.id, user.id, config);
     setLoading(false);
 
     if (jobError || !job) {
@@ -232,7 +270,13 @@ export default function CreateClip() {
       return;
     }
 
+    await createGenerationSteps(job.id);
+
+    // 5 — Navigate immediately; pipeline runs in the background
     navigate(`/dashboard/projects/${project.id}`);
+
+    // Fire-and-forget: errors are caught and persisted inside runPipeline
+    runPipeline(job);
   };
 
   return (

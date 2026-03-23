@@ -7,6 +7,8 @@
  * changing the calling interface.
  */
 import { supabase } from './supabase';
+import { fal, FAL_MODELS } from './fal';
+import type { KlingVideoOutput } from './fal';
 import type { GenerationJob, GenerationStepName, JobStatus } from '../types';
 
 // ─── Step Utilities ───────────────────────────────────────────────────────────
@@ -170,24 +172,83 @@ export async function expandPrompts(
 }
 
 /**
- * Step 4 — Dispatch visual generation for each scene.
- * In production: calls video synthesis API (e.g. Runway, Kling, Pika).
+ * Step 4 — Dispatch visual generation for each scene via fal.ai (Kling 2.5 Turbo).
+ * Generates one 5–10s clip per section, stores each result immediately.
+ * Caps at MAX_SCENES to keep generation time and cost manageable.
  */
 export async function dispatchVisualGeneration(
   job: GenerationJob,
   prompts: ScenePrompt[]
-): Promise<{ scene_ids: string[] }> {
+): Promise<{ scene_urls: string[] }> {
   await updateJob(job.id, { status: 'generating_scenes', progress: 55, current_step: 'scene_generation' });
   await updateStep(job.id, 'scene_generation', { status: 'running' });
 
-  await logStep(job.id, 'scene_generation', 'info', `Dispatching ${prompts.length} scenes to ${job.provider_stack.video_synthesis}`);
+  const config = job.config_snapshot;
 
-  // Mock: simulate async generation
-  const sceneIds = prompts.map((_, i) => `scene_${job.id}_${i}`);
+  // Cap number of generated clips to limit cost (~$0.35–0.70 per clip at $0.07/sec)
+  const MAX_SCENES = 6;
+  const scenes = prompts.slice(0, MAX_SCENES);
 
-  await updateStep(job.id, 'scene_generation', { status: 'completed', progress: 100, metadata: { scene_count: sceneIds.length } });
+  const sceneUrls: string[] = [];
 
-  return { scene_ids: sceneIds };
+  for (let i = 0; i < scenes.length; i++) {
+    const scene = scenes[i];
+
+    await updateJob(job.id, {
+      progress: 55 + Math.round((i / scenes.length) * 25),
+    });
+    await logStep(job.id, 'scene_generation', 'info',
+      `Generating scene ${i + 1}/${scenes.length} (${scene.section_type})`);
+
+    try {
+      const prompt = `${scene.positive_prompt}, ${scene.shot_instruction}`.slice(0, 500);
+      const negativePrompt = scene.negative_prompt.slice(0, 200);
+
+      const result = await fal.subscribe(FAL_MODELS.kling_text_to_video, {
+        input: {
+          prompt,
+          negative_prompt: negativePrompt,
+          duration: snapDuration(scene.duration_seconds),
+          aspect_ratio: mapAspectRatio(config.aspect_ratio),
+        },
+      }) as KlingVideoOutput;
+
+      const videoUrl = result.video.url;
+      sceneUrls.push(videoUrl);
+
+      // Persist clip immediately — visible in the UI as soon as it arrives
+      await supabase.from('generation_outputs').insert({
+        job_id: job.id,
+        project_id: job.project_id,
+        output_type: 'scene_clip',
+        file_url: videoUrl,
+        file_size_bytes: result.video.file_size ?? 0,
+        duration_seconds: snapDuration(scene.duration_seconds),
+        width: getResolutionDimensions(config.aspect_ratio).width,
+        height: getResolutionDimensions(config.aspect_ratio).height,
+        resolution: getResolutionString(config.aspect_ratio),
+        format: 'mp4',
+        metadata: {
+          scene_index: i,
+          section_type: scene.section_type,
+          fal_file_name: result.video.file_name,
+        },
+      });
+
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Scene generation failed';
+      await updateStep(job.id, 'scene_generation', { status: 'failed', error_message: msg });
+      throw new Error(`Scene ${i + 1}/${scenes.length} failed: ${msg}`);
+    }
+  }
+
+  await updateStep(job.id, 'scene_generation', {
+    status: 'completed',
+    progress: 100,
+    metadata: { scene_count: sceneUrls.length },
+  });
+
+  return { scene_urls: sceneUrls };
 }
 
 /**
@@ -196,7 +257,7 @@ export async function dispatchVisualGeneration(
  */
 export async function assembleEdit(
   job: GenerationJob,
-  sceneIds: string[],
+  sceneUrls: string[],
   bpm: number
 ): Promise<{ edit_manifest: EditManifest }> {
   await updateJob(job.id, { status: 'assembling_edit', progress: 75, current_step: 'clip_stitching' });
@@ -206,8 +267,8 @@ export async function assembleEdit(
     job_id: job.id,
     bpm,
     total_duration: job.config_snapshot.duration_seconds,
-    scenes: sceneIds.map((id, i) => ({
-      scene_id: id,
+    scenes: sceneUrls.map((url, i) => ({
+      scene_id: url,
       order: i,
       transition: i === 0 ? 'none' : getTransitionType(job.config_snapshot.editing_intensity),
     })),
@@ -241,9 +302,11 @@ export async function renderFinalExport(
 
   await logStep(job.id, 'final_export', 'info', `Rendering with profile: ${job.config_snapshot.render_profile_id ?? 'default'}`);
 
-  // Mock: real implementation calls render farm
-  const outputUrl = `https://storage.example.com/outputs/${job.id}/final.mp4`;
-  const fileSizeBytes = manifest.total_duration * 1_500_000; // ~1.5 MB/s estimate
+  // Use the first generated scene clip as the preview output.
+  // Full FFmpeg concatenation will replace this in Step 5.
+  const firstScene = manifest.scenes[0]?.scene_id ?? '';
+  const outputUrl = firstScene || `https://storage.example.com/outputs/${job.id}/final.mp4`;
+  const fileSizeBytes = manifest.total_duration * 1_500_000;
 
   await updateStep(job.id, 'final_export', { status: 'completed', progress: 100, metadata: { output_url: outputUrl } });
 
@@ -288,6 +351,39 @@ export async function finalizeJob(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// ─── Pipeline Orchestrator ────────────────────────────────────────────────────
+
+/**
+ * Run the full generation pipeline for a job.
+ * Call this after createGenerationJob() + createGenerationSteps().
+ * Safe to fire-and-forget from the frontend — errors are persisted to the DB.
+ */
+export async function runPipeline(job: GenerationJob): Promise<void> {
+  try {
+    await updateJob(job.id, { started_at: new Date().toISOString() } as Parameters<typeof updateJob>[1]);
+
+    const { bpm } = await analyzeAudio(job);
+    const { sections } = await extractTrackSections(job, bpm);
+    const { prompts } = await expandPrompts(job, sections);
+    const { scene_urls } = await dispatchVisualGeneration(job, prompts);
+    const { edit_manifest } = await assembleEdit(job, scene_urls, bpm);
+    const { output_url, file_size_bytes } = await renderFinalExport(job, edit_manifest);
+    await finalizeJob(job, output_url, file_size_bytes);
+
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Pipeline failed';
+    await supabase.from('generation_jobs').update({
+      status: 'failed',
+      error_message: msg,
+      completed_at: new Date().toISOString(),
+    }).eq('id', job.id);
+    await supabase.from('projects').update({
+      status: 'draft',
+      updated_at: new Date().toISOString(),
+    }).eq('id', job.project_id);
+  }
+}
 
 function buildBasePrompt(config: GenerationJob['config_snapshot']): string {
   const modeDescriptors: Record<string, string> = {
@@ -369,6 +465,22 @@ function getResolutionDimensions(aspectRatio: string): { width: number; height: 
 function getResolutionString(aspectRatio: string): string {
   const { width, height } = getResolutionDimensions(aspectRatio);
   return `${width}x${height}`;
+}
+
+/** Snap scene duration to the nearest value Kling supports (5s or 10s). */
+function snapDuration(seconds: number): 5 | 10 {
+  return seconds >= 7.5 ? 10 : 5;
+}
+
+/**
+ * Map Cineforge aspect ratios to the three values Kling 2.5 supports.
+ * 4:5 → 9:16 (closest vertical), 21:9 → 16:9 (closest horizontal).
+ */
+function mapAspectRatio(ratio: string): '16:9' | '9:16' | '1:1' {
+  if (ratio === '9:16') return '9:16';
+  if (ratio === '1:1') return '1:1';
+  if (ratio === '4:5') return '9:16';
+  return '16:9';
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────

@@ -76,6 +76,26 @@ export async function getRecentJobs(userId: string, limit = 10) {
   return { data, error };
 }
 
+const PIPELINE_STEPS = [
+  'audio_ingestion', 'bpm_analysis', 'scene_segmentation', 'prompt_expansion',
+  'scene_generation', 'clip_stitching', 'beat_sync', 'subtitle_rendering', 'final_export',
+] as const;
+
+/**
+ * Insert all 9 pipeline steps as 'pending' for a given job.
+ * Must be called right after createGenerationJob so the pipeline
+ * can UPDATE them (not INSERT) during execution.
+ */
+export async function createGenerationSteps(jobId: string) {
+  const rows = PIPELINE_STEPS.map((step_name) => ({
+    job_id: jobId,
+    step_name,
+    status: 'pending',
+    progress: 0,
+  }));
+  return supabase.from('generation_steps').insert(rows);
+}
+
 export async function cancelJob(jobId: string, userId: string) {
   const { data, error } = await supabase
     .from('generation_jobs')
