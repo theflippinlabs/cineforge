@@ -22,6 +22,11 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    // Required for ffmpeg.wasm SharedArrayBuffer support in local development
+    headers: {
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+      'Cross-Origin-Opener-Policy': 'same-origin',
+    },
   },
 
   preview: {

@@ -293,7 +293,7 @@ export interface GenerationOutput {
   id: string;
   job_id: string;
   project_id: string;
-  output_type: 'preview' | 'final' | 'thumbnail' | 'storyboard';
+  output_type: 'preview' | 'final' | 'thumbnail' | 'storyboard' | 'scene_clip';
   file_url: string;
   file_size_bytes: number;
   duration_seconds: number;
@@ -315,6 +315,8 @@ export interface ProjectConfig {
   duration_seconds: number;
   scene_density: SceneDensity;
   realism_level: number;
+  /** Public URL of the uploaded audio track — used by analyze-audio Edge Function. */
+  audio_url: string | null;
   camera_language: CameraLanguage;
   shot_language: ShotLanguage;
   editing_intensity: EditingIntensity;
@@ -326,6 +328,9 @@ export interface ProjectConfig {
   quality_guardrails: boolean;
   reference_image_url: string | null;
   render_profile_id: string | null;
+  /** Public URLs of character reference images (max 4). When present, the pipeline
+   *  uses kling_image_to_video and rotates through these images across scenes. */
+  character_image_urls: string[] | null;
 }
 
 /** Which AI providers are used at each stage of the pipeline */

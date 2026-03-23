@@ -7,6 +7,9 @@
  * changing the calling interface.
  */
 import { supabase } from './supabase';
+import { fal, FAL_MODELS } from './fal';
+import type { KlingVideoOutput } from './fal';
+import { assembleMusicVideo } from './ffmpeg';
 import type { GenerationJob, GenerationStepName, JobStatus } from '../types';
 
 // ─── Step Utilities ───────────────────────────────────────────────────────────
@@ -76,31 +79,58 @@ async function logStep(
 // ─── Pipeline Steps ───────────────────────────────────────────────────────────
 
 /**
- * Step 1 — Ingest audio from URL or storage path.
- * Validates format, duration, and sample rate.
+ * Step 1 — Ingest and analyze audio via the analyze-audio Edge Function.
+ * Returns real BPM (music-metadata + energy detection) and duration.
+ * Falls back to config-based defaults if the audio URL is unavailable.
  */
 export async function analyzeAudio(job: GenerationJob): Promise<{ bpm: number; duration: number; waveform: number[] }> {
   await updateJob(job.id, { status: 'analyzing_audio', progress: 10, current_step: 'audio_ingestion' });
   await updateStep(job.id, 'audio_ingestion', { status: 'running' });
 
   try {
-    await logStep(job.id, 'audio_ingestion', 'info', `Ingesting audio: ${job.config_snapshot.concept_prompt.slice(0, 60)}`);
+    const audioUrl = job.config_snapshot.audio_url;
+    await logStep(job.id, 'audio_ingestion', 'info',
+      audioUrl ? `Analyzing audio: ${audioUrl.split('/').pop()}` : 'No audio URL — using config defaults');
 
-    // Mock: real implementation calls audio analysis provider (e.g. Essentia, AudD)
-    const mockResult = {
-      bpm: 120 + Math.round(Math.random() * 40),
-      duration: job.config_snapshot.duration_seconds,
-      waveform: Array.from({ length: 100 }, () => Math.random()),
+    let bpm = 120;
+    let duration = job.config_snapshot.duration_seconds;
+
+    if (audioUrl) {
+      // Call the analyze-audio Edge Function for real BPM + duration
+      const { data, error } = await supabase.functions.invoke('analyze-audio', {
+        body: { audio_url: audioUrl },
+      });
+
+      if (!error && data) {
+        bpm = data.bpm ?? bpm;
+        // Use real duration if available and plausible (>5s)
+        if (data.duration && data.duration > 5) {
+          duration = Math.round(data.duration);
+          // Sync the config so downstream steps use the real track length
+          job.config_snapshot.duration_seconds = duration;
+        }
+        await logStep(job.id, 'audio_ingestion', 'info',
+          `Detected: ${duration}s, format=${data.format ?? 'unknown'}, bitrate=${data.bitrate ?? '?'} bps`);
+      } else {
+        await logStep(job.id, 'audio_ingestion', 'warn',
+          `Audio analysis failed (${error?.message ?? 'unknown error'}) — using defaults`);
+      }
+    }
+
+    const result = {
+      bpm,
+      duration,
+      waveform: Array.from({ length: 100 }, (_, i) => 0.3 + 0.7 * Math.abs(Math.sin(i * 0.3))),
     };
 
-    await updateStep(job.id, 'audio_ingestion', { status: 'completed', progress: 100, metadata: mockResult });
+    await updateStep(job.id, 'audio_ingestion', { status: 'completed', progress: 100, metadata: result });
     await updateJob(job.id, { progress: 15, current_step: 'bpm_analysis' });
     await updateStep(job.id, 'bpm_analysis', { status: 'running' });
 
-    await logStep(job.id, 'bpm_analysis', 'info', `Detected BPM: ${mockResult.bpm}`);
-    await updateStep(job.id, 'bpm_analysis', { status: 'completed', progress: 100, metadata: { bpm: mockResult.bpm } });
+    await logStep(job.id, 'bpm_analysis', 'info', `BPM: ${bpm} | Duration: ${duration}s`);
+    await updateStep(job.id, 'bpm_analysis', { status: 'completed', progress: 100, metadata: { bpm, duration } });
 
-    return mockResult;
+    return result;
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Audio analysis failed';
     await updateStep(job.id, 'audio_ingestion', { status: 'failed', error_message: msg });
@@ -170,24 +200,93 @@ export async function expandPrompts(
 }
 
 /**
- * Step 4 — Dispatch visual generation for each scene.
- * In production: calls video synthesis API (e.g. Runway, Kling, Pika).
+ * Step 4 — Dispatch visual generation for each scene via fal.ai (Kling 2.5 Turbo).
+ * Generates one 5–10s clip per section, stores each result immediately.
+ * Caps at MAX_SCENES to keep generation time and cost manageable.
  */
 export async function dispatchVisualGeneration(
   job: GenerationJob,
   prompts: ScenePrompt[]
-): Promise<{ scene_ids: string[] }> {
+): Promise<{ scene_urls: string[] }> {
   await updateJob(job.id, { status: 'generating_scenes', progress: 55, current_step: 'scene_generation' });
   await updateStep(job.id, 'scene_generation', { status: 'running' });
 
-  await logStep(job.id, 'scene_generation', 'info', `Dispatching ${prompts.length} scenes to ${job.provider_stack.video_synthesis}`);
+  const config = job.config_snapshot;
+  const characterImages = config.character_image_urls ?? [];
+  const hasCharacters = characterImages.length > 0;
 
-  // Mock: simulate async generation
-  const sceneIds = prompts.map((_, i) => `scene_${job.id}_${i}`);
+  // Cap number of generated clips to limit cost (~$0.35–0.70 per clip at $0.07/sec)
+  const MAX_SCENES = 6;
+  const scenes = prompts.slice(0, MAX_SCENES);
 
-  await updateStep(job.id, 'scene_generation', { status: 'completed', progress: 100, metadata: { scene_count: sceneIds.length } });
+  const sceneUrls: string[] = [];
 
-  return { scene_ids: sceneIds };
+  for (let i = 0; i < scenes.length; i++) {
+    const scene = scenes[i];
+
+    await updateJob(job.id, {
+      progress: 55 + Math.round((i / scenes.length) * 25),
+    });
+    await logStep(job.id, 'scene_generation', 'info',
+      `Generating scene ${i + 1}/${scenes.length} (${scene.section_type})${hasCharacters ? ' [with character reference]' : ''}`);
+
+    try {
+      const prompt = `${scene.positive_prompt}, ${scene.shot_instruction}`.slice(0, 500);
+      const negativePrompt = scene.negative_prompt.slice(0, 200);
+      const duration = snapDuration(scene.duration_seconds);
+      const aspect_ratio = mapAspectRatio(config.aspect_ratio);
+
+      // Rotate through character images across scenes for visual variety
+      // e.g. scene 0 → char[0], scene 1 → char[1 % n], scene 2 → char[2 % n]
+      const characterImageUrl = hasCharacters
+        ? characterImages[i % characterImages.length]
+        : null;
+
+      const result = characterImageUrl
+        ? await fal.subscribe(FAL_MODELS.kling_image_to_video, {
+            input: { image_url: characterImageUrl, prompt, negative_prompt: negativePrompt, duration, aspect_ratio },
+          }) as KlingVideoOutput
+        : await fal.subscribe(FAL_MODELS.kling_text_to_video, {
+            input: { prompt, negative_prompt: negativePrompt, duration, aspect_ratio },
+          }) as KlingVideoOutput;
+
+      const videoUrl = result.video.url;
+      sceneUrls.push(videoUrl);
+
+      // Persist clip immediately — visible in the UI as soon as it arrives
+      await supabase.from('generation_outputs').insert({
+        job_id: job.id,
+        project_id: job.project_id,
+        output_type: 'scene_clip',
+        file_url: videoUrl,
+        file_size_bytes: result.video.file_size ?? 0,
+        duration_seconds: snapDuration(scene.duration_seconds),
+        width: getResolutionDimensions(config.aspect_ratio).width,
+        height: getResolutionDimensions(config.aspect_ratio).height,
+        resolution: getResolutionString(config.aspect_ratio),
+        format: 'mp4',
+        metadata: {
+          scene_index: i,
+          section_type: scene.section_type,
+          fal_file_name: result.video.file_name,
+          character_reference_url: characterImageUrl ?? null,
+        },
+      });
+
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Scene generation failed';
+      await updateStep(job.id, 'scene_generation', { status: 'failed', error_message: msg });
+      throw new Error(`Scene ${i + 1}/${scenes.length} failed: ${msg}`);
+    }
+  }
+
+  await updateStep(job.id, 'scene_generation', {
+    status: 'completed',
+    progress: 100,
+    metadata: { scene_count: sceneUrls.length },
+  });
+
+  return { scene_urls: sceneUrls };
 }
 
 /**
@@ -196,7 +295,7 @@ export async function dispatchVisualGeneration(
  */
 export async function assembleEdit(
   job: GenerationJob,
-  sceneIds: string[],
+  sceneUrls: string[],
   bpm: number
 ): Promise<{ edit_manifest: EditManifest }> {
   await updateJob(job.id, { status: 'assembling_edit', progress: 75, current_step: 'clip_stitching' });
@@ -206,8 +305,8 @@ export async function assembleEdit(
     job_id: job.id,
     bpm,
     total_duration: job.config_snapshot.duration_seconds,
-    scenes: sceneIds.map((id, i) => ({
-      scene_id: id,
+    scenes: sceneUrls.map((url, i) => ({
+      scene_id: url,
       order: i,
       transition: i === 0 ? 'none' : getTransitionType(job.config_snapshot.editing_intensity),
     })),
@@ -215,7 +314,7 @@ export async function assembleEdit(
     color_grade: getCinematicModeGrade(job.config_snapshot.cinematic_mode),
   };
 
-  await logStep(job.id, 'clip_stitching', 'info', `Assembled ${sceneIds.length} clips`);
+  await logStep(job.id, 'clip_stitching', 'info', `Assembled ${sceneUrls.length} clips`);
   await updateStep(job.id, 'clip_stitching', { status: 'completed', progress: 100 });
 
   if (job.config_snapshot.has_subtitles) {
@@ -230,7 +329,9 @@ export async function assembleEdit(
 }
 
 /**
- * Step 6 — Render final export using configured render profile.
+ * Step 6 — Assemble final MP4 with ffmpeg.wasm.
+ * Concatenates all scene clips and mixes in the original audio track.
+ * Uploads the result to Supabase Storage (assembled-videos bucket).
  */
 export async function renderFinalExport(
   job: GenerationJob,
@@ -239,11 +340,49 @@ export async function renderFinalExport(
   await updateJob(job.id, { status: 'rendering_export', progress: 90, current_step: 'final_export' });
   await updateStep(job.id, 'final_export', { status: 'running' });
 
-  await logStep(job.id, 'final_export', 'info', `Rendering with profile: ${job.config_snapshot.render_profile_id ?? 'default'}`);
+  const clipUrls = manifest.scenes.map((s) => s.scene_id);
+  const audioUrl = job.config_snapshot.audio_url ?? null;
 
-  // Mock: real implementation calls render farm
-  const outputUrl = `https://storage.example.com/outputs/${job.id}/final.mp4`;
-  const fileSizeBytes = manifest.total_duration * 1_500_000; // ~1.5 MB/s estimate
+  await logStep(job.id, 'final_export', 'info',
+    `Assembling ${clipUrls.length} clips${audioUrl ? ' + audio track' : ''} with ffmpeg.wasm`);
+
+  let outputUrl: string;
+  let fileSizeBytes: number;
+
+  try {
+    const { blob, filename } = await assembleMusicVideo({
+      clipUrls,
+      audioUrl,
+      jobId: job.id,
+      onProgress: async (pct) => {
+        await updateJob(job.id, { progress: 90 + Math.round(pct * 0.09) }); // 90 → 99
+      },
+    });
+
+    fileSizeBytes = blob.size;
+
+    // Upload assembled MP4 to Supabase Storage
+    const storagePath = `${job.user_id}/${job.id}_final.mp4`;
+    const { error: uploadError } = await supabase.storage
+      .from('assembled-videos')
+      .upload(storagePath, blob, { contentType: 'video/mp4', upsert: true });
+
+    if (uploadError) throw new Error(`Storage upload failed: ${uploadError.message}`);
+
+    const { data: urlData } = supabase.storage
+      .from('assembled-videos')
+      .getPublicUrl(storagePath);
+
+    outputUrl = urlData.publicUrl;
+    await logStep(job.id, 'final_export', 'info', `Uploaded: ${(fileSizeBytes / 1_048_576).toFixed(1)} MB`);
+
+  } catch (err) {
+    // Graceful fallback: use first scene clip so the job still completes
+    const msg = err instanceof Error ? err.message : 'Assembly failed';
+    await logStep(job.id, 'final_export', 'warn', `ffmpeg.wasm error — falling back to first clip: ${msg}`);
+    outputUrl = clipUrls[0] ?? '';
+    fileSizeBytes = manifest.total_duration * 1_500_000;
+  }
 
   await updateStep(job.id, 'final_export', { status: 'completed', progress: 100, metadata: { output_url: outputUrl } });
 
@@ -288,6 +427,39 @@ export async function finalizeJob(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// ─── Pipeline Orchestrator ────────────────────────────────────────────────────
+
+/**
+ * Run the full generation pipeline for a job.
+ * Call this after createGenerationJob() + createGenerationSteps().
+ * Safe to fire-and-forget from the frontend — errors are persisted to the DB.
+ */
+export async function runPipeline(job: GenerationJob): Promise<void> {
+  try {
+    await updateJob(job.id, { started_at: new Date().toISOString() } as Parameters<typeof updateJob>[1]);
+
+    const { bpm } = await analyzeAudio(job);
+    const { sections } = await extractTrackSections(job, bpm);
+    const { prompts } = await expandPrompts(job, sections);
+    const { scene_urls } = await dispatchVisualGeneration(job, prompts);
+    const { edit_manifest } = await assembleEdit(job, scene_urls, bpm);
+    const { output_url, file_size_bytes } = await renderFinalExport(job, edit_manifest);
+    await finalizeJob(job, output_url, file_size_bytes);
+
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Pipeline failed';
+    await supabase.from('generation_jobs').update({
+      status: 'failed',
+      error_message: msg,
+      completed_at: new Date().toISOString(),
+    }).eq('id', job.id);
+    await supabase.from('projects').update({
+      status: 'draft',
+      updated_at: new Date().toISOString(),
+    }).eq('id', job.project_id);
+  }
+}
 
 function buildBasePrompt(config: GenerationJob['config_snapshot']): string {
   const modeDescriptors: Record<string, string> = {
@@ -369,6 +541,22 @@ function getResolutionDimensions(aspectRatio: string): { width: number; height: 
 function getResolutionString(aspectRatio: string): string {
   const { width, height } = getResolutionDimensions(aspectRatio);
   return `${width}x${height}`;
+}
+
+/** Snap scene duration to the nearest value Kling supports (5s or 10s). */
+function snapDuration(seconds: number): 5 | 10 {
+  return seconds >= 7.5 ? 10 : 5;
+}
+
+/**
+ * Map Cineforge aspect ratios to the three values Kling 2.5 supports.
+ * 4:5 → 9:16 (closest vertical), 21:9 → 16:9 (closest horizontal).
+ */
+function mapAspectRatio(ratio: string): '16:9' | '9:16' | '1:1' {
+  if (ratio === '9:16') return '9:16';
+  if (ratio === '1:1') return '1:1';
+  if (ratio === '4:5') return '9:16';
+  return '16:9';
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────

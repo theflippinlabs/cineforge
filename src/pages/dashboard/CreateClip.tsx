@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Upload, Link2, Wand2, ChevronRight, AlertCircle,
-  Lock, ChevronDown,
+  Lock, ChevronDown, ImagePlus, X,
 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -15,8 +15,9 @@ import { Alert, AlertDescription } from '../../components/ui/alert';
 import { Separator } from '../../components/ui/separator';
 import { Badge } from '../../components/ui/badge';
 import { useAuth } from '../../contexts/AuthContext';
-import { createProject } from '../../lib/projects';
-import { createGenerationJob } from '../../lib/jobs';
+import { createProject, uploadAudio, uploadCharacterImage } from '../../lib/projects';
+import { createGenerationJob, createGenerationSteps } from '../../lib/jobs';
+import { runPipeline } from '../../lib/pipeline';
 import { PROMPT_PRESETS, VISUAL_STYLE_LABELS, MOOD_LABELS, PACING_LABELS } from '../../lib/presets';
 import { CINEMATIC_MODES, SHOT_LANGUAGES } from '../../lib/quality';
 import type {
@@ -140,8 +141,34 @@ export default function CreateClip() {
   const [enableGuardrails, setEnableGuardrails] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  const [characterFiles, setCharacterFiles] = useState<File[]>([]);
+  const [characterPreviews, setCharacterPreviews] = useState<string[]>([]);
+  const characterInputRef = useRef<HTMLInputElement>(null);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleCharacterFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const incoming = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const valid = incoming.filter(
+      (f) => validTypes.includes(f.type) && f.size <= 5 * 1024 * 1024
+    );
+    setCharacterFiles((prev) => {
+      const next = [...prev, ...valid].slice(0, 4);
+      // Build object URL previews for the new files
+      const newPreviews = valid.slice(0, 4 - prev.length).map((f) => URL.createObjectURL(f));
+      setCharacterPreviews((p) => [...p, ...newPreviews].slice(0, 4));
+      return next;
+    });
+  };
+
+  const removeCharacter = (index: number) => {
+    URL.revokeObjectURL(characterPreviews[index]);
+    setCharacterFiles((prev) => prev.filter((_, i) => i !== index));
+    setCharacterPreviews((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const applyMode = (mode: CinematicMode) => {
     const config = CINEMATIC_MODES.find((m) => m.id === mode);
@@ -195,6 +222,27 @@ export default function CreateClip() {
     setError(null);
     setLoading(true);
 
+    // 1 — Upload audio file to Supabase Storage (if file mode)
+    let resolvedAudioUrl: string | null = audioTab === 'url' ? audioUrl : null;
+    if (audioTab === 'upload' && audioFile) {
+      const { url, error: uploadError } = await uploadAudio(audioFile, user.id);
+      if (uploadError || !url) {
+        setError(uploadError?.message ?? 'Audio upload failed.');
+        setLoading(false);
+        return;
+      }
+      resolvedAudioUrl = url;
+    }
+
+    // 2 — Upload character reference images (if any)
+    const characterImageUrls: string[] = [];
+    for (const file of characterFiles) {
+      const { url, error: imgErr } = await uploadCharacterImage(file, user.id);
+      if (url) characterImageUrls.push(url);
+      else if (imgErr) console.warn('Character upload failed:', imgErr.message);
+    }
+
+    // 3 — Create project
     const { data: project, error: projError } = await createProject(user.id, {
       title: title.trim() || `${VISUAL_STYLE_LABELS[visualStyle]} — ${new Date().toLocaleDateString()}`,
       concept_prompt: conceptPrompt,
@@ -215,7 +263,7 @@ export default function CreateClip() {
       has_style_lock: hasStyleLock,
       quality_guardrails: enableGuardrails,
       lyrics: lyrics || null,
-      audio_url: audioTab === 'url' ? audioUrl : null,
+      audio_url: resolvedAudioUrl,
     });
 
     if (projError || !project) {
@@ -224,7 +272,33 @@ export default function CreateClip() {
       return;
     }
 
-    const { data: job, error: jobError } = await createGenerationJob(project.id, user.id);
+    // 4 — Build the config snapshot that travels with every generation job
+    const config = {
+      concept_prompt: conceptPrompt,
+      visual_style: visualStyle,
+      mood,
+      pacing,
+      aspect_ratio: aspectRatio,
+      duration_seconds: durationSeconds,
+      scene_density: sceneDensity,
+      realism_level: realismLevel,
+      camera_language: cameraLanguage,
+      shot_language: shotLanguage,
+      editing_intensity: editingIntensity,
+      cinematic_mode: cinematicMode,
+      negative_prompt: negativePrompt || null,
+      has_brand_overlay: hasBrandOverlay,
+      has_subtitles: hasSubtitles,
+      has_style_lock: hasStyleLock,
+      quality_guardrails: enableGuardrails,
+      audio_url: resolvedAudioUrl,
+      reference_image_url: null,
+      render_profile_id: null,
+      character_image_urls: characterImageUrls.length > 0 ? characterImageUrls : null,
+    };
+
+    // 5 — Create job + pipeline steps
+    const { data: job, error: jobError } = await createGenerationJob(project.id, user.id, config);
     setLoading(false);
 
     if (jobError || !job) {
@@ -232,7 +306,13 @@ export default function CreateClip() {
       return;
     }
 
+    await createGenerationSteps(job.id);
+
+    // 6 — Navigate immediately; pipeline runs in the background
     navigate(`/dashboard/projects/${project.id}`);
+
+    // Fire-and-forget: errors are caught and persisted inside runPipeline
+    runPipeline(job);
   };
 
   return (
@@ -308,6 +388,59 @@ export default function CreateClip() {
               </div>
             </TabsContent>
           </Tabs>
+        </Section>
+
+        <Separator className="bg-border/30" />
+
+        {/* Character References */}
+        <Section title="Character References" badge="Optional">
+          <p className="text-xs text-muted-foreground/70 mb-3">
+            Upload photos or illustrations of characters — the AI will feature them in your clip's scenes.
+            JPG, PNG, WebP · Max 5 MB per image · Up to 4 characters.
+          </p>
+
+          <div className="flex flex-wrap gap-3">
+            {/* Existing previews */}
+            {characterPreviews.map((src, i) => (
+              <div key={i} className="relative group w-20 h-20 rounded-lg overflow-hidden border border-border/50 bg-secondary/20 flex-shrink-0">
+                <img src={src} alt={characterFiles[i]?.name} className="w-full h-full object-cover" />
+                <button
+                  type="button"
+                  onClick={() => removeCharacter(i)}
+                  className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity"
+                  aria-label={`Remove ${characterFiles[i]?.name}`}
+                >
+                  <X className="w-4 h-4 text-white" />
+                </button>
+              </div>
+            ))}
+
+            {/* Add button (hidden once 4 reached) */}
+            {characterFiles.length < 4 && (
+              <button
+                type="button"
+                onClick={() => characterInputRef.current?.click()}
+                className="w-20 h-20 rounded-lg border-2 border-dashed border-border/40 bg-secondary/10 hover:border-primary/40 hover:bg-primary/5 transition-all flex flex-col items-center justify-center gap-1 flex-shrink-0"
+              >
+                <ImagePlus className="w-5 h-5 text-muted-foreground/50" />
+                <span className="text-[10px] text-muted-foreground/50">Add</span>
+              </button>
+            )}
+            <input
+              ref={characterInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              multiple
+              className="hidden"
+              onChange={handleCharacterFilesChange}
+            />
+          </div>
+
+          {characterFiles.length > 0 && (
+            <p className="text-xs text-primary/70 mt-2">
+              {characterFiles.length} character{characterFiles.length > 1 ? 's' : ''} — the AI will use these as reference frames via Kling image-to-video.
+            </p>
+          )}
         </Section>
 
         <Separator className="bg-border/30" />
