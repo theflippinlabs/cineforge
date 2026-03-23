@@ -209,17 +209,15 @@ export async function resolveAccessStatus(userId: string): Promise<AccessStatus>
   const hasWallet = wallets.length > 0;
   const nftVerified = (eligibilityResult.data?.length ?? 0) > 0;
 
-  const FREE_LIMIT = 5;
-
   return {
-    tier: nftVerified ? 'nft_verified' : 'free',
+    tier: nftVerified ? 'nft_verified' : 'guest',
     walletConnected: hasWallet,
     nftVerified,
     unlockedFeatures: nftVerified
       ? ['hd_export', 'unlimited_generations', 'priority_queue', 'all_styles', 'brand_overlay']
-      : ['preview_generation'],
-    generationsRemaining: nftVerified ? 999 : FREE_LIMIT,
-    generationsTotal: nftVerified ? 999 : FREE_LIMIT,
+      : [],
+    generationsRemaining: nftVerified ? 999 : 0,
+    generationsTotal: nftVerified ? 999 : 0,
   };
 }
 

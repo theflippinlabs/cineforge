@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Wallet as WalletIcon,
   Shield,
@@ -11,6 +12,7 @@ import {
   Sparkles,
   Lock,
   ArrowRight,
+  KeyRound,
 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
@@ -31,6 +33,8 @@ import { cn } from '../../lib/utils';
 
 export default function WalletPage() {
   const { user, accessStatus, refreshAccessStatus } = useAuth();
+  const location = useLocation();
+  const nftRequired = (location.state as { nftRequired?: boolean } | null)?.nftRequired === true;
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [nftRules, setNftRules] = useState<NFTAccessRule[]>([]);
   const [nftStatuses, setNftStatuses] = useState<Record<string, boolean>>({});
@@ -130,6 +134,21 @@ export default function WalletPage() {
           Connect your wallet and verify NFT ownership to unlock premium features.
         </p>
       </div>
+
+      {/* NFT access required notice */}
+      {nftRequired && !accessStatus?.nftVerified && (
+        <div className="rounded-xl border border-primary/30 bg-primary/5 p-5 flex items-start gap-4">
+          <div className="w-9 h-9 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
+            <KeyRound className="w-4 h-4 text-primary" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-foreground mb-0.5">Accès réservé aux détenteurs du NFT</p>
+            <p className="text-sm text-muted-foreground">
+              Connectez votre wallet Cronos et vérifiez la possession du NFT pour accéder à la plateforme.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Feedback */}
       {error && (
