@@ -1,102 +1,51 @@
-import SignClient from '@walletconnect/sign-client';
+import { createAppKit } from '@reown/appkit';
+import { EthersAdapter } from '@reown/appkit-adapter-ethers';
+import type { AppKitNetwork } from '@reown/appkit/networks';
 
 const PROJECT_ID = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID as string | undefined;
 
-// Cronos mainnet (chain ID 25) is the target chain for NFT verification
-const REQUIRED_NAMESPACES = {
-  eip155: {
-    methods: ['eth_accounts', 'eth_chainId'],
-    chains: ['eip155:25'],
-    events: ['accountsChanged', 'chainChanged'],
+// Cronos Mainnet (chain ID 25)
+const cronos: AppKitNetwork = {
+  id: 25,
+  name: 'Cronos',
+  nativeCurrency: { name: 'CRO', symbol: 'CRO', decimals: 18 },
+  rpcUrls: {
+    default: { http: ['https://evm.cronos.org'] },
+  },
+  blockExplorers: {
+    default: { name: 'Cronoscan', url: 'https://cronoscan.com' },
   },
 };
 
-let _client: SignClient | null = null;
+let _kit: ReturnType<typeof createAppKit> | null = null;
 
-async function getSignClient(): Promise<SignClient> {
-  if (_client) return _client;
+export function getAppKit(): ReturnType<typeof createAppKit> {
+  if (_kit) return _kit;
 
   if (!PROJECT_ID) {
     throw new Error(
-      'WalletConnect project ID not configured. Add VITE_WALLETCONNECT_PROJECT_ID to your .env file. ' +
-      'Get a free project ID at https://cloud.walletconnect.com'
+      'WalletConnect project ID manquant. Ajoutez VITE_WALLETCONNECT_PROJECT_ID dans votre .env. ' +
+      'Obtenez un ID gratuit sur https://cloud.walletconnect.com'
     );
   }
 
-  _client = await SignClient.init({
+  _kit = createAppKit({
+    adapters: [new EthersAdapter()],
+    networks: [cronos],
     projectId: PROJECT_ID,
     metadata: {
       name: 'Synema',
-      description: 'AI Video Generation Platform — NFT gated access',
-      url: typeof window !== 'undefined' ? window.location.origin : 'https://synemalabs.xyz',
-      icons: [typeof window !== 'undefined' ? `${window.location.origin}/favicon.ico` : ''],
+      description: 'AI Video Generation Platform',
+      url: window.location.origin,
+      icons: [`${window.location.origin}/favicon.ico`],
     },
+    features: {
+      analytics: false,
+      email: false,
+      socials: false,
+    },
+    themeMode: 'dark',
   });
 
-  return _client;
-}
-
-export interface WCPairing {
-  uri: string;
-  /** Call to wait for the user to approve in their wallet. Resolves with address + chainId. */
-  approve: () => Promise<{ address: string; chainId: number }>;
-  /** Call to abort the pairing. */
-  abort: () => void;
-}
-
-export async function createWCPairing(): Promise<WCPairing> {
-  const client = await getSignClient();
-
-  const { uri, approval } = await client.connect({
-    requiredNamespaces: REQUIRED_NAMESPACES,
-  });
-
-  if (!uri) throw new Error('Failed to generate WalletConnect pairing URI.');
-
-  let aborted = false;
-  let rejectApproval: (() => void) | null = null;
-
-  return {
-    uri,
-    approve: () =>
-      new Promise<{ address: string; chainId: number }>((resolve, reject) => {
-        rejectApproval = () => reject(new Error('Connection cancelled.'));
-        if (aborted) { reject(new Error('Connection cancelled.')); return; }
-
-        approval()
-          .then((session) => {
-            if (aborted) { reject(new Error('Connection cancelled.')); return; }
-            const accounts = session.namespaces.eip155?.accounts ?? [];
-            if (!accounts.length) { reject(new Error('No accounts returned from wallet.')); return; }
-            const parts = accounts[0].split(':');
-            const chainId = parseInt(parts[1], 10);
-            const address = parts[2];
-            resolve({ address, chainId });
-          })
-          .catch(reject);
-      }),
-    abort: () => {
-      aborted = true;
-      rejectApproval?.();
-    },
-  };
-}
-
-/** Deep link builders for common wallets (mobile only) */
-export function buildWalletDeepLink(wallet: 'metamask' | 'defi' | 'trust', wcUri: string): string {
-  const encoded = encodeURIComponent(wcUri);
-  switch (wallet) {
-    case 'metamask':
-      return `metamask://wc?uri=${encoded}`;
-    case 'defi':
-      // Crypto.com DeFi Wallet
-      return `cryptowallet://wc?uri=${encoded}`;
-    case 'trust':
-      return `trust://wc?uri=${encoded}`;
-  }
-}
-
-export function isMobileBrowser(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  return _kit;
 }

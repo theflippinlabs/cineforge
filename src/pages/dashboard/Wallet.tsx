@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { QRCodeSVG } from 'qrcode.react';
 import {
   Wallet as WalletIcon,
   Shield,
@@ -13,16 +12,12 @@ import {
   Sparkles,
   Lock,
   KeyRound,
-  X,
-  Copy,
-  Smartphone,
 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Card, CardContent } from '../../components/ui/card';
 import { Separator } from '../../components/ui/separator';
 import { Alert, AlertDescription } from '../../components/ui/alert';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   connectBrowserWallet,
@@ -32,122 +27,9 @@ import {
   verifyNFTOwnership,
   getNFTAccessRules,
 } from '../../lib/wallet';
-import {
-  createWCPairing,
-  buildWalletDeepLink,
-  isMobileBrowser,
-  type WCPairing,
-} from '../../lib/walletconnect';
+import { getAppKit } from '../../lib/walletconnect';
 import type { Wallet, NFTAccessRule } from '../../types';
 import { cn } from '../../lib/utils';
-
-// ─── WalletConnect Modal ───────────────────────────────────────────────────────
-
-function WCModal({
-  pairing,
-  onClose,
-  onConnected,
-}: {
-  pairing: WCPairing;
-  onClose: () => void;
-  onConnected: (address: string, chainId: number) => void;
-}) {
-  const [copied, setCopied] = useState(false);
-  const isMobile = isMobileBrowser();
-
-  useEffect(() => {
-    let cancelled = false;
-    pairing.approve().then(({ address, chainId }) => {
-      if (!cancelled) onConnected(address, chainId);
-    }).catch(() => {
-      if (!cancelled) onClose();
-    });
-    return () => { cancelled = true; };
-  }, []);
-
-  const copyUri = async () => {
-    await navigator.clipboard.writeText(pairing.uri);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const openDeepLink = (wallet: 'metamask' | 'defi' | 'trust') => {
-    window.location.href = buildWalletDeepLink(wallet, pairing.uri);
-  };
-
-  return (
-    <Dialog open onOpenChange={(open) => { if (!open) { pairing.abort(); onClose(); } }}>
-      <DialogContent className="max-w-sm bg-background border-border/60">
-        <DialogHeader>
-          <DialogTitle className="text-base font-semibold">Connect with WalletConnect</DialogTitle>
-        </DialogHeader>
-
-        {isMobile ? (
-          // Mobile: show deep link buttons to open wallet apps
-          <div className="space-y-4 py-2">
-            <p className="text-sm text-muted-foreground text-center">
-              Open your wallet app to connect. Make sure Cronos network is enabled.
-            </p>
-            <div className="space-y-2">
-              {[
-                { id: 'metamask' as const, label: 'MetaMask', sublabel: 'Supports Cronos via custom RPC' },
-                { id: 'defi' as const, label: 'DeFi Wallet', sublabel: 'Crypto.com — native Cronos support' },
-                { id: 'trust' as const, label: 'Trust Wallet', sublabel: 'Supports Cronos' },
-              ].map(({ id, label, sublabel }) => (
-                <button
-                  key={id}
-                  onClick={() => openDeepLink(id)}
-                  className="w-full flex items-center gap-3 rounded-xl border border-border/50 bg-secondary/20 hover:bg-secondary/40 transition-colors p-3 text-left"
-                >
-                  <div className="w-9 h-9 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
-                    <Smartphone className="w-4 h-4 text-primary" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-foreground">{label}</p>
-                    <p className="text-xs text-muted-foreground">{sublabel}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={copyUri}
-              className="w-full flex items-center justify-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors py-2"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              {copied ? 'Copied!' : 'Copy connection URI'}
-            </button>
-          </div>
-        ) : (
-          // Desktop: show QR code
-          <div className="space-y-4 py-2">
-            <p className="text-sm text-muted-foreground text-center">
-              Scan with your mobile wallet app. Make sure Cronos network is enabled.
-            </p>
-            <div className="flex justify-center">
-              <div className="rounded-xl border border-border/40 bg-white p-4">
-                <QRCodeSVG value={pairing.uri} size={220} />
-              </div>
-            </div>
-            <button
-              onClick={copyUri}
-              className="w-full flex items-center justify-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              {copied ? 'Copied!' : 'Copy URI'}
-            </button>
-          </div>
-        )}
-
-        <div className="flex items-center gap-2 justify-center text-xs text-muted-foreground/50 pt-1">
-          <div className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-pulse" />
-          Waiting for wallet connection…
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function WalletPage() {
   const { user, accessStatus, refreshAccessStatus } = useAuth();
@@ -159,13 +41,14 @@ export default function WalletPage() {
   const [nftStatuses, setNftStatuses] = useState<Record<string, boolean>>({});
   const [connecting, setConnecting] = useState(false);
   const [verifying, setVerifying] = useState(false);
-  const [wcPairing, setWcPairing] = useState<WCPairing | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const cleanupRef = useRef<Array<() => void>>([]);
 
   useEffect(() => {
     if (user?.id) loadWallets();
     loadNftRules();
+    return () => { cleanupRef.current.forEach(fn => fn()); };
   }, [user?.id]);
 
   const loadNftRules = async () => {
@@ -179,55 +62,65 @@ export default function WalletPage() {
     if (data) setWallets(data);
   };
 
-  // Browser extension wallet (MetaMask desktop etc.)
-  const handleConnectExtension = async () => {
-    if (!user) return;
-    setError(null);
-    setConnecting(true);
-    try {
-      const result = await connectBrowserWallet();
-      const { data, error } = await linkWallet(user.id, result.address, result.chainId);
-      if (error) {
-        setError(error.message);
-      } else if (data) {
-        setSuccess(`Wallet ${result.address.slice(0, 6)}...${result.address.slice(-4)} connected.`);
-        await loadWallets();
-        await refreshAccessStatus();
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to connect wallet.');
-    } finally {
-      setConnecting(false);
-    }
-  };
-
-  // WalletConnect
-  const handleConnectWC = async () => {
-    if (!user) return;
-    setError(null);
-    setConnecting(true);
-    try {
-      const pairing = await createWCPairing();
-      setWcPairing(pairing);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start WalletConnect session.');
-    } finally {
-      setConnecting(false);
-    }
-  };
-
-  const handleWCConnected = useCallback(async (address: string, chainId: number) => {
-    setWcPairing(null);
+  const saveWallet = async (address: string, chainId: number) => {
     if (!user) return;
     const { data, error } = await linkWallet(user.id, address, chainId);
     if (error) {
       setError(error.message);
     } else if (data) {
-      setSuccess(`Wallet ${address.slice(0, 6)}...${address.slice(-4)} connected via WalletConnect.`);
+      setSuccess(`Wallet ${address.slice(0, 6)}...${address.slice(-4)} connecté.`);
       await loadWallets();
       await refreshAccessStatus();
     }
-  }, [user]);
+  };
+
+  // Reown AppKit modal (WalletConnect + browser wallets, desktop & mobile)
+  const handleConnect = () => {
+    if (!user) return;
+    setError(null);
+    setConnecting(true);
+
+    let kit: ReturnType<typeof getAppKit>;
+    try {
+      kit = getAppKit();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur WalletConnect.');
+      setConnecting(false);
+      return;
+    }
+
+    const unsubs: Array<() => void> = [];
+    let settled = false;
+
+    const finish = () => {
+      settled = true;
+      unsubs.forEach(fn => fn());
+      cleanupRef.current = cleanupRef.current.filter(fn => !unsubs.includes(fn));
+      setConnecting(false);
+    };
+
+    const unsubAccount = kit.subscribeAccount(async (account) => {
+      if (settled) return;
+      if (account.isConnected && account.address) {
+        finish();
+        await saveWallet(account.address, account.chainId ?? 25);
+      }
+    });
+    unsubs.push(unsubAccount);
+    cleanupRef.current.push(unsubAccount);
+
+    const unsubState = kit.subscribeState((state: { open: boolean }) => {
+      if (settled) return;
+      if (!state.open) {
+        // Short delay lets subscribeAccount fire first if both fire together
+        setTimeout(() => { if (!settled) finish(); }, 300);
+      }
+    });
+    unsubs.push(unsubState);
+    cleanupRef.current.push(unsubState);
+
+    kit.open();
+  };
 
   const handleUnlink = async (walletId: string) => {
     if (!user) return;
@@ -268,19 +161,9 @@ export default function WalletPage() {
   };
 
   const truncateAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
-  const hasExtensionWallet = typeof window !== 'undefined' && !!window.ethereum;
 
   return (
     <div className="p-6 lg:p-8 max-w-4xl mx-auto space-y-8">
-      {/* WalletConnect modal */}
-      {wcPairing && (
-        <WCModal
-          pairing={wcPairing}
-          onClose={() => setWcPairing(null)}
-          onConnected={handleWCConnected}
-        />
-      )}
-
       {/* Header */}
       <div>
         <h1 className="font-display text-2xl font-bold text-foreground tracking-tight">Wallet & Access</h1>
@@ -375,33 +258,24 @@ export default function WalletPage() {
             <h2 className="font-semibold text-foreground">Wallets connectés</h2>
             <p className="text-xs text-muted-foreground mt-0.5">Wallets compatibles Cronos (EVM)</p>
           </div>
-          <div className="flex items-center gap-2">
-            {/* WalletConnect — works on mobile & desktop */}
-            <Button
-              size="sm"
-              onClick={handleConnectWC}
-              disabled={connecting}
-              className="bg-primary/10 text-primary border border-primary/20 hover:bg-primary/15"
-            >
-              {connecting ? (
-                <div className="flex items-center gap-2">
-                  <div className="w-3.5 h-3.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-                  Connexion…
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Plus className="h-3.5 w-3.5" />
-                  WalletConnect
-                </div>
-              )}
-            </Button>
-            {/* Extension wallet — only show if available */}
-            {hasExtensionWallet && (
-              <Button size="sm" variant="outline" onClick={handleConnectExtension} disabled={connecting}>
-                Extension
-              </Button>
+          <Button
+            size="sm"
+            onClick={handleConnect}
+            disabled={connecting}
+            className="bg-primary/10 text-primary border border-primary/20 hover:bg-primary/15"
+          >
+            {connecting ? (
+              <div className="flex items-center gap-2">
+                <div className="w-3.5 h-3.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                Connexion…
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Plus className="h-3.5 w-3.5" />
+                Connecter
+              </div>
             )}
-          </div>
+          </Button>
         </div>
 
         {wallets.length === 0 ? (
@@ -411,7 +285,7 @@ export default function WalletPage() {
             <p className="text-xs text-muted-foreground/60 mb-5">
               Utilisez WalletConnect pour connecter MetaMask, DeFi Wallet, Trust Wallet ou tout wallet compatible Cronos.
             </p>
-            <Button size="sm" onClick={handleConnectWC} disabled={connecting}>
+            <Button size="sm" onClick={handleConnect} disabled={connecting}>
               <WalletIcon className="mr-2 h-4 w-4" />
               Connecter via WalletConnect
             </Button>
