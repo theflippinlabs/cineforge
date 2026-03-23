@@ -43,10 +43,10 @@ function HeroSection() {
         }}
       />
 
-      <div className="relative max-w-7xl mx-auto px-6 py-24 text-center">
+      <div className="relative max-w-7xl mx-auto px-6 py-8 text-center">
         <div className="animate-slide-up">
-          <div className="flex justify-center mb-8">
-            <LogoMark className="w-[50vw] h-[50vw] md:w-[30vw] md:h-[30vw] lg:w-[20vw] lg:h-[20vw] max-w-sm max-h-sm" />
+          <div className="flex justify-center mb-4">
+            <LogoMark className="w-[80vw] h-[80vw] md:w-[55vw] md:h-[55vw] lg:w-[38vw] lg:h-[38vw] max-w-xl max-h-xl" />
           </div>
 
           <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight leading-[1.05] mb-8">
