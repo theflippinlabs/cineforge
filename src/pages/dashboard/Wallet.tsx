@@ -68,7 +68,7 @@ export default function WalletPage() {
     if (error) {
       setError(error.message);
     } else if (data) {
-      setSuccess(`Wallet ${address.slice(0, 6)}...${address.slice(-4)} connecté.`);
+      setSuccess(`Wallet ${address.slice(0, 6)}...${address.slice(-4)} connected.`);
       await loadWallets();
       await refreshAccessStatus();
     }
@@ -84,7 +84,7 @@ export default function WalletPage() {
     try {
       kit = getAppKit();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erreur WalletConnect.');
+      setError(err instanceof Error ? err.message : 'WalletConnect error.');
       setConnecting(false);
       return;
     }
@@ -179,9 +179,9 @@ export default function WalletPage() {
             <KeyRound className="w-4 h-4 text-primary" />
           </div>
           <div>
-            <p className="text-sm font-semibold text-foreground mb-0.5">Accès réservé aux détenteurs du NFT</p>
+            <p className="text-sm font-semibold text-foreground mb-0.5">NFT holders only</p>
             <p className="text-sm text-muted-foreground">
-              Connectez votre wallet Cronos et vérifiez la possession du NFT pour accéder à la plateforme.
+              Connect your Cronos wallet and verify NFT ownership to access the platform.
             </p>
           </div>
         </div>
@@ -219,16 +219,16 @@ export default function WalletPage() {
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <h3 className="font-semibold text-foreground">
-                    {accessStatus?.nftVerified ? 'Accès débloqué' : 'Accès verrouillé'}
+                    {accessStatus?.nftVerified ? 'Access unlocked' : 'Access locked'}
                   </h3>
                   <Badge className={cn('text-xs', accessStatus?.nftVerified ? 'bg-primary/10 text-primary border-primary/20' : 'bg-secondary text-muted-foreground border-border')}>
-                    {accessStatus?.nftVerified ? 'NFT Vérifié' : 'Non vérifié'}
+                    {accessStatus?.nftVerified ? 'NFT Verified' : 'Not verified'}
                   </Badge>
                 </div>
                 <p className="text-sm text-muted-foreground">
                   {accessStatus?.nftVerified
-                    ? 'Vous avez accès complet à la plateforme Synema.'
-                    : 'Connectez un wallet détenant le NFT Synema Access Pass sur Cronos.'}
+                    ? 'You have full access to the Synema platform.'
+                    : 'Connect a wallet holding the Synema Access Pass NFT on Cronos.'}
                 </p>
                 {accessStatus?.nftVerified && (
                   <div className="flex flex-wrap gap-2 mt-3">
@@ -244,7 +244,7 @@ export default function WalletPage() {
             {accessStatus?.nftVerified && (
               <Button variant="outline" size="sm" onClick={handleVerify} disabled={verifying}>
                 <RefreshCw className={cn('mr-2 h-3.5 w-3.5', verifying && 'animate-spin')} />
-                {verifying ? 'Vérification...' : 'Rafraîchir'}
+                {verifying ? 'Verifying...' : 'Refresh'}
               </Button>
             )}
           </div>
@@ -255,8 +255,8 @@ export default function WalletPage() {
       <div>
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="font-semibold text-foreground">Wallets connectés</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Wallets compatibles Cronos (EVM)</p>
+            <h2 className="font-semibold text-foreground">Connected wallets</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Cronos-compatible wallets (EVM)</p>
           </div>
           <Button
             size="sm"
@@ -267,12 +267,12 @@ export default function WalletPage() {
             {connecting ? (
               <div className="flex items-center gap-2">
                 <div className="w-3.5 h-3.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-                Connexion…
+                Connecting…
               </div>
             ) : (
               <div className="flex items-center gap-2">
                 <Plus className="h-3.5 w-3.5" />
-                Connecter
+                Connect
               </div>
             )}
           </Button>
@@ -281,13 +281,13 @@ export default function WalletPage() {
         {wallets.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border/40 bg-secondary/10 p-10 text-center">
             <WalletIcon className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
-            <p className="text-sm font-medium text-muted-foreground mb-1">Aucun wallet connecté</p>
+            <p className="text-sm font-medium text-muted-foreground mb-1">No wallet connected</p>
             <p className="text-xs text-muted-foreground/60 mb-5">
-              Utilisez WalletConnect pour connecter MetaMask, DeFi Wallet, Trust Wallet ou tout wallet compatible Cronos.
+              Use WalletConnect to connect MetaMask, DeFi Wallet, Trust Wallet or any Cronos-compatible wallet.
             </p>
             <Button size="sm" onClick={handleConnect} disabled={connecting}>
               <WalletIcon className="mr-2 h-4 w-4" />
-              Connecter via WalletConnect
+              Connect via WalletConnect
             </Button>
           </div>
         ) : (
@@ -303,7 +303,7 @@ export default function WalletPage() {
                       {truncateAddress(wallet.address)}
                     </p>
                     {wallet.is_primary && (
-                      <Badge variant="outline" className="text-xs border-primary/20 text-primary">Principal</Badge>
+                      <Badge variant="outline" className="text-xs border-primary/20 text-primary">Primary</Badge>
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground">{wallet.chain_name}</p>
@@ -331,7 +331,7 @@ export default function WalletPage() {
 
             <Button variant="outline" size="sm" onClick={handleVerify} disabled={verifying} className="w-full">
               <Shield className={cn('mr-2 h-4 w-4', verifying && 'animate-spin')} />
-              {verifying ? 'Vérification en cours…' : 'Vérifier la possession du NFT'}
+              {verifying ? 'Verifying…' : 'Verify NFT ownership'}
             </Button>
           </div>
         )}
@@ -342,15 +342,15 @@ export default function WalletPage() {
       {/* Eligible collections */}
       <div>
         <div className="mb-5">
-          <h2 className="font-semibold text-foreground">Collection éligible</h2>
+          <h2 className="font-semibold text-foreground">Eligible collection</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Détenir ce NFT sur Cronos débloque l'accès complet à la plateforme.
+            Hold this NFT on Cronos to unlock full platform access.
           </p>
         </div>
 
         {nftRules.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border/40 bg-secondary/10 p-8 text-center">
-            <p className="text-sm text-muted-foreground">Aucune collection configurée.</p>
+            <p className="text-sm text-muted-foreground">No collection configured.</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -373,10 +373,10 @@ export default function WalletPage() {
                         isEligible ? (
                           <span className="inline-flex items-center gap-1 text-xs bg-success/10 text-success border border-success/20 rounded-full px-2 py-0.5">
                             <CheckCircle2 className="w-3 h-3" />
-                            Vérifié
+                            Verified
                           </span>
                         ) : (
-                          <span className="text-xs text-muted-foreground/50">Non détenu</span>
+                          <span className="text-xs text-muted-foreground/50">Not held</span>
                         )
                       )}
                     </div>
